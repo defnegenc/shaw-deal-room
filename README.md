@@ -96,7 +96,22 @@ The `Diligence Materials` panel links to the exact local documents the agent rea
 
 ## Architecture
 
-The MVP uses an explicit orchestrator agent rather than a hidden autonomous loop. The agent calls deterministic tools in order:
+The agent has two planning modes behind one interface:
+
+- **LLM reasoning loop** (default when `GEMINI_API_KEY` is set): the model
+  chooses the next tool to run from a catalog, observes the result, re-senses
+  the deal, and decides again until it finishes — a genuine agentic loop. Every
+  decision and rationale is logged to the run trace.
+- **Deterministic plan** (fallback for no-key / offline / tests, and if the LLM
+  is unreachable): the stage-aware checklist below.
+
+In both modes the **tools are deterministic and produce cited, confidence-scored
+facts** — the model decides *what to do*, never *what is true*. The agent also
+reads the deal audit log first, so providers a human previously corrected are
+distrusted on later runs. See [ARCHITECTURE.md](ARCHITECTURE.md) and
+[AUDIT_AND_FIXES.md](AUDIT_AND_FIXES.md).
+
+The deterministic tools, in the fallback order:
 
 1. Inspect deal state.
 2. Process uploaded or inferred local documents.
@@ -145,4 +160,18 @@ Important caveat: the MVP uses SQLite on the app filesystem. That is fine for a 
 
 ## GenAI Usage Disclosure
 
-ChatGPT/Codex was used to help plan the architecture, scaffold the implementation, and draft code. The design and implementation choices were reviewed with emphasis on keeping the MVP narrow, auditable, and provenance-first.
+> Please confirm/adjust this section so it reflects your own process before submitting.
+
+Two GenAI tools were used:
+
+- **ChatGPT / Codex** — initial architecture planning, scaffolding, and a first
+  draft of the implementation.
+- **Claude Code (Claude Opus / Sonnet)** — a full audit of the agent pipeline
+  and the subsequent fixes: preserving human-authored facts across runs, wiring
+  the source-reliability feedback loop, run atomicity, and the LLM reasoning
+  loop (the agentic core). See `AUDIT_AND_FIXES.md` for the per-change record.
+
+Main prompts were, in effect: "audit the agentic pipeline, surface where it
+falls short of the brief, and fix it" and "make it a genuine reasoning loop, not
+hardcoded rules." All design and implementation choices were reviewed with an
+emphasis on keeping the prototype narrow, auditable, and provenance-first.

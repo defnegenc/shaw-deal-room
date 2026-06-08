@@ -53,7 +53,12 @@ graph TD
 - `computed_metrics`: derived values like ARR valuation multiple.
 - `conflicts`: contradictory facts requiring manual reconciliation.
 - `review_items`: Associate work queue for conflicts, low confidence, and stale data.
-- `agent_runs`: audit trail of tools used by the planning agent.
+- `agent_runs`: audit trail of every planning run (tools used, full trace, status incl. `failed`).
+- `deal_events`: append-only change log (old → new value, source, provider, reason); the source-reliability loop reads this to learn which providers were corrected.
+
+`facts` and `metric_observations` carry a `locked` flag: human-authored,
+canonical values that survive agent re-runs and suppress competing
+re-extractions for the same field.
 
 ## Data Schema Design
 
@@ -207,7 +212,48 @@ For example:
 
 ## Agent Decision Logic
 
-The prototype exposes the agent's plan rather than hiding orchestration in backend code. The agent now uses a **stage-aware coverage checklist** plus a **source strategy**.
+The agent has two planning modes behind one interface (`decide(context) ->
+Decision`):
+
+1. **LLM reasoning loop (`LLMReasoningPlanner`, default when `GEMINI_API_KEY`
+   is set).** A genuine agentic loop: the model is given the objective, the
+   open coverage gaps, the providers a human previously corrected, and the
+   observations from tools already run, and it chooses the single next tool
+   from a catalog (`process_documents`, `enrich_company`, `web_research`,
+   `detect_conflicts`, `compute_metrics`, `check_staleness`, `finish`). The
+   loop executes that tool, **re-senses** the deal, and asks again — up to a
+   step cap. Every decision and its rationale is logged to the run trace.
+2. **Deterministic plan (fallback).** When no key is configured, the model is
+   unreachable, or for reproducible tests/demos, the agent uses the
+   stage-aware checklist below. If the LLM planner fails before doing useful
+   work, the run **degrades to this path** rather than returning empty.
+
+The key design choice: the **planner (model) owns control flow** — which tool,
+in what order, when to stop — while the **tools are deterministic and own fact
+production** — extraction, citation, confidence, conflict-flagging. The model
+can reorder, skip, or react to findings, but it can never emit a value without
+a cited tool behind it. That keeps reasoning adaptive while every resulting
+fact stays auditable. As the tool/source catalog grows, the loop absorbs new
+tools by description; a deterministic `if/else` tree would grow combinatorially.
+
+### Source-reliability feedback loop
+
+Before planning, the agent reads the deal's `DealEvent` audit log via
+`SourceReliabilityService`. Any provider/source a human previously *corrected*
+on this deal is distrusted: its other facts are routed to review (with an
+explaining reason) instead of auto-accepted. This is how the agent learns from
+being wrong and feeds that learning into future runs.
+
+### Durability across runs
+
+A run rebuilds agent-derived intelligence but **preserves human-authored
+(`locked`) facts and observations, resolved review items and conflicts, and the
+`agent_runs` audit trail**. A locked field is canonical: the agent will not
+re-extract or re-flag it, so an associate never re-validates a settled value.
+The whole run is one transaction; a failure rolls back and records a `failed`
+run for traceability.
+
+### Deterministic plan (fallback detail)
 
 Initial plan:
 
@@ -340,3 +386,23 @@ For this MVP, that keeps the schema explicit and easy to inspect. In production,
 - Deterministic extraction is intentionally favored over LLM-first extraction because cited fields like ARR and valuation are easy to validate.
 - Mock enrichment keeps the demo reliable while preserving the integration boundary for future vendor or web data.
 - Gemini Flash can be enabled as an optional fallback for narrative or messy document text. Deterministic extraction runs first; LLM fallback only runs for fields that were missed, and those facts are treated as review-oriented because the extraction method is less deterministic.
+
+## Security & Production Hardening (out of scope, noted)
+
+These are deliberately out of scope for the prototype but must not be silent:
+
+- **No authentication/authorization.** Anyone who can reach the API can read,
+  edit, and delete deals and run the agent. Production needs SSO and per-deal
+  access control. This is the top production risk for an internal tool holding
+  deal terms.
+- **API keys in URLs.** Gemini calls pass the key as a query parameter; move to
+  a header so keys do not land in logs/proxies.
+- **Prompt injection.** Document text is interpolated into LLM prompts; a
+  malicious document could attempt to steer extraction. Mitigated by a field
+  allowlist and quoted-evidence requirement, but LLM evidence is not yet
+  verified against source text (see `AUDIT_AND_FIXES.md`).
+- **Path traversal** on document view/download is mitigated via an allowlist
+  (`_safe_source_document_path`); uploads sanitize filenames.
+
+See `AUDIT_AND_FIXES.md` for the full audit, the fixes applied, and the
+remaining limitations.
