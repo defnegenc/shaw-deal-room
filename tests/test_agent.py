@@ -5,6 +5,7 @@ from unittest.mock import patch
 from scripts.build_db import build_db
 from src.agents.deal_research_agent import DealResearchAgent
 from src.database.connection import SessionLocal
+from src.agents.reasoning import FixedPlanner
 from src.database.models import AgentRun, Fact
 from src.services.review_resolution import ReviewResolutionService
 
@@ -159,6 +160,41 @@ class RunAtomicityTests(unittest.TestCase):
         self.assertEqual(facts_after, facts_before, "a failed run corrupted the fact set")
         self.assertEqual(human, 1, "the locked human correction was lost")
         self.assertEqual(failed_runs, 1, "the failed run was not recorded in the audit trail")
+
+
+class ReasoningLoopTests(unittest.TestCase):
+    def setUp(self) -> None:
+        os.environ["GEMINI_API_KEY"] = ""
+        os.environ["SERPER_API_KEY"] = ""
+        build_db()
+
+    def test_loop_executes_planner_chosen_tools_in_order(self) -> None:
+        # A scripted planner stands in for the LLM so the loop can be tested
+        # without a model. The loop must run the chosen tools, in order, and
+        # produce the same kind of cited results as the deterministic path.
+        actions = [
+            "process_documents",
+            "enrich_company",
+            "detect_conflicts",
+            "compute_metrics",
+            "check_staleness",
+            "finish",
+        ]
+        with SessionLocal() as db:
+            agent = DealResearchAgent(db, planner=FixedPlanner(actions))
+            result = agent.update_deal_intelligence(deal_id="d_orbit")
+
+        planned_actions = [step["action"] for step in result.plan]
+        self.assertEqual(planned_actions[: len(actions)], actions)
+        self.assertTrue(any(metric["metric_name"] == "arr_valuation_multiple" for metric in result.computed_metrics))
+        self.assertTrue(result.accepted_facts)
+
+    def test_loop_can_stop_immediately(self) -> None:
+        with SessionLocal() as db:
+            agent = DealResearchAgent(db, planner=FixedPlanner(["finish"]))
+            result = agent.update_deal_intelligence(deal_id="d_orbit")
+        self.assertEqual([step["action"] for step in result.plan], ["finish"])
+        self.assertEqual(result.computed_metrics, [])
 
 
 if __name__ == "__main__":

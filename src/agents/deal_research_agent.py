@@ -15,6 +15,7 @@ from src.services.fact_service import FactService
 from src.services.metric_service import MetricService
 from src.services.source_reliability import SourceReliabilityService
 from src.services.web_research import WebResearchService
+from src.agents.reasoning import TOOL_CATALOG, LLMReasoningPlanner
 from src.utils.ids import new_id
 
 
@@ -36,9 +37,21 @@ class AgentResult:
     source_strategy: list[dict]
 
 
+MAX_REASONING_STEPS = 8
+
+
 class DealResearchAgent:
-    def __init__(self, db: Session):
+    def __init__(self, db: Session, planner=None):
         self.db = db
+        # Planner selection: an explicitly injected planner wins (tests use a
+        # scripted one); otherwise use the LLM planner when a key is present;
+        # otherwise fall back to the deterministic plan so the agent always
+        # runs offline and tests stay hermetic.
+        if planner is not None:
+            self.reasoning_planner = planner
+        else:
+            llm_planner = LLMReasoningPlanner()
+            self.reasoning_planner = llm_planner if llm_planner.enabled else None
         self.deal_service = DealService(db)
         self.document_service = DocumentProcessingService(db)
         self.fact_service = FactService(db)
@@ -59,6 +72,8 @@ class DealResearchAgent:
         # caller error, not a run failure worth recording.
         deal = self._resolve_deal(deal_id, company_name, website)
         try:
+            if self.reasoning_planner is not None:
+                return self._run_reasoning(deal, doc_paths)
             return self._run(deal, doc_paths)
         except Exception as exc:
             # The whole run is one unit of work. On any failure, discard the
@@ -154,6 +169,127 @@ class DealResearchAgent:
         self.db.commit()
 
         return self._build_result(run.run_id, deal, tools_used, plan, coverage, source_strategy_trace)
+
+    def _run_reasoning(self, deal: Deal, doc_paths: list[str] | None) -> AgentResult:
+        """Agentic path: a planner chooses the next tool, observes the result,
+        re-senses the deal, and decides again -- until it finishes or hits the
+        step cap. Tool implementations are the same deterministic, cited tools
+        the fixed planner uses; only the *control flow* is model-driven."""
+        run = AgentRun(
+            run_id=new_id("run"),
+            deal_id=deal.deal_id,
+            objective="update_deal_intelligence",
+            status="running",
+            tools_used="[]",
+            trace_json="{}",
+        )
+        self.db.add(run)
+        self.db.flush()
+
+        trace: list[dict] = []
+        tools_used: list[str] = []
+        plan: list[dict] = []
+        processed_facts: list[Fact] = []
+
+        state = self._inspect_state(deal, doc_paths)
+        paths = state["doc_paths"]
+        reliability = self.reliability_service.context_for_deal(deal.deal_id)
+        trace.append({"tool": "review_source_reliability", "corrected_providers": sorted(reliability.corrected_providers)})
+        trace.append({"tool": "inspect_state", **state})
+
+        observations: list[dict] = []
+        for _ in range(MAX_REASONING_STEPS):
+            coverage = self._coverage_for_deal(deal)
+            source_strategy = self._source_strategy(deal, coverage)
+            decision = self.reasoning_planner.decide(
+                self._reasoning_context(deal, state, coverage, reliability, observations)
+            )
+            plan.append({"action": decision.action, "reason": decision.rationale})
+            trace.append({"tool": "reason", "action": decision.action, "rationale": decision.rationale})
+            if decision.action == "finish" or decision.action not in TOOL_CATALOG:
+                break
+            observation = self._execute_named_tool(
+                decision.action, deal, reliability, paths, source_strategy, trace, tools_used, processed_facts
+            )
+            observations.append({"action": decision.action, "observation": observation})
+
+        run.status = "completed"
+        run.tools_used = json.dumps(tools_used)
+        coverage = self._coverage_for_deal(deal)
+        source_strategy = self._source_strategy(deal, coverage)
+        run.trace_json = json.dumps({"trace": trace, "plan": plan, "coverage": coverage, "source_strategy": source_strategy})
+        run.completed_at = datetime.utcnow()
+        self.db.commit()
+
+        return self._build_result(run.run_id, deal, tools_used, plan, coverage, source_strategy)
+
+    def _reasoning_context(self, deal: Deal, state: dict, coverage: list[dict], reliability, observations: list[dict]) -> dict:
+        open_gaps = [
+            {
+                "field": item["field_name"],
+                "status": item["status"],
+                "priority": item["priority"],
+                "source_preference": item["source_preference"],
+            }
+            for item in coverage
+            if item["status"] != "accepted"
+        ]
+        return {
+            "objective": (
+                "Bring this deal's required fields to accepted coverage using the most "
+                "trustworthy available source, and flag anything uncertain for human review."
+            ),
+            "company": deal.company.name,
+            "stage": deal.stage,
+            "documents_available": state["document_count"],
+            "distrusted_providers": sorted(reliability.corrected_providers),
+            "coverage_gaps": open_gaps,
+            "actions_taken": [obs["action"] for obs in observations],
+            "last_observations": observations[-3:],
+        }
+
+    def _execute_named_tool(
+        self,
+        action: str,
+        deal: Deal,
+        reliability,
+        paths: list[str],
+        source_strategy: list[dict],
+        trace: list[dict],
+        tools_used: list[str],
+        processed_facts: list[Fact],
+    ) -> dict:
+        if action == "process_documents":
+            facts = self._tool_process_documents(deal, paths, trace, tools_used)
+            processed_facts.extend(facts)
+            return {"facts": len(facts)}
+        if action == "enrich_company":
+            facts = self._tool_enrich_company(deal, reliability, trace, tools_used)
+            processed_facts.extend(facts)
+            return {"facts": len(facts)}
+        if action == "web_research":
+            target_fields = self._web_target_fields(source_strategy)
+            reason = "Planner requested external research for open coverage gaps."
+            result = self._tool_web_research(deal, reliability, target_fields, reason, trace, tools_used, processed_facts)
+            self._create_clarification_reviews(deal, result.clarification_questions)
+            self._create_missing_required_reviews(deal, self._coverage_for_deal(deal))
+            return {"facts": len(result.facts), "used_live_search": result.used_live_search}
+        if action == "detect_conflicts":
+            tools_used.append("detect_conflicts")
+            conflicts = self.conflict_service.detect_conflicts(deal.deal_id, deal.company_id)
+            trace.append({"tool": "detect_conflicts", "conflicts": len(conflicts)})
+            return {"conflicts": len(conflicts)}
+        if action == "compute_metrics":
+            tools_used.append("compute_metrics")
+            computed = self.metric_service.compute_for_deal(deal.deal_id, deal.company_id)
+            trace.append({"tool": "compute_metrics", "computed_metrics": len(computed)})
+            return {"computed_metrics": len(computed)}
+        if action == "check_staleness":
+            tools_used.append("check_staleness")
+            self.deal_service.create_staleness_review_items(deal.deal_id, deal.company_id)
+            trace.append({"tool": "check_staleness"})
+            return {}
+        return {"skipped": action}
 
     # --- Tools -----------------------------------------------------------
     # Each tool performs one capability and records what it did into the
