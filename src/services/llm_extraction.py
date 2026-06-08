@@ -32,7 +32,7 @@ class LLMExtractionService:
     def __init__(self) -> None:
         load_env_file()
         self.api_key = os.environ.get("GEMINI_API_KEY")
-        self.model = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
+        self.model = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
 
     @property
     def enabled(self) -> bool:

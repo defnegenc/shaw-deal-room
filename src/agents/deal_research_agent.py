@@ -205,12 +205,14 @@ class DealResearchAgent:
         trace.append({"tool": "inspect_state", **state})
 
         observations: list[dict] = []
+        exhausted: set[str] = set()
         for _ in range(MAX_REASONING_STEPS):
             coverage = self._coverage_for_deal(deal)
+            gaps_before = {item["field_name"] for item in coverage if item["status"] != "accepted"}
             source_strategy = self._source_strategy(deal, coverage)
             try:
                 decision = self.reasoning_planner.decide(
-                    self._reasoning_context(deal, state, coverage, reliability, observations)
+                    self._reasoning_context(deal, state, coverage, reliability, observations, exhausted)
                 )
             except PlannerUnavailable:
                 if not observations:
@@ -224,10 +226,19 @@ class DealResearchAgent:
             trace.append({"tool": "reason", "action": decision.action, "rationale": decision.rationale})
             if decision.action == "finish" or decision.action not in TOOL_CATALOG:
                 break
+            if decision.action in exhausted:
+                # The planner re-picked a tool that already ran without closing
+                # any coverage gap. Stop rather than spin to the step cap.
+                trace.append({"tool": "stop", "reason": f"{decision.action} exhausted; no further progress."})
+                break
             observation = self._execute_named_tool(
                 decision.action, deal, reliability, paths, source_strategy, trace, tools_used, processed_facts
             )
             observations.append({"action": decision.action, "observation": observation})
+            gaps_after = {item["field_name"] for item in self._coverage_for_deal(deal) if item["status"] != "accepted"}
+            if not (gaps_before - gaps_after):
+                # This tool closed no new coverage gap; don't run it again.
+                exhausted.add(decision.action)
 
         run.status = "completed"
         run.tools_used = json.dumps(tools_used)
@@ -239,7 +250,9 @@ class DealResearchAgent:
 
         return self._build_result(run.run_id, deal, tools_used, plan, coverage, source_strategy)
 
-    def _reasoning_context(self, deal: Deal, state: dict, coverage: list[dict], reliability, observations: list[dict]) -> dict:
+    def _reasoning_context(
+        self, deal: Deal, state: dict, coverage: list[dict], reliability, observations: list[dict], exhausted: set[str] | None = None
+    ) -> dict:
         open_gaps = [
             {
                 "field": item["field_name"],
@@ -262,6 +275,7 @@ class DealResearchAgent:
             "coverage_gaps": open_gaps,
             "actions_taken": [obs["action"] for obs in observations],
             "last_observations": observations[-3:],
+            "exhausted_actions": sorted(exhausted or set()),
         }
 
     def _execute_named_tool(

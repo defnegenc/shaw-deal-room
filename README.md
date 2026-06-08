@@ -146,7 +146,7 @@ python -m uvicorn src.api.main:app --host 0.0.0.0 --port ${PORT:-8000}
 
 ```bash
 GEMINI_API_KEY=...
-GEMINI_MODEL=gemini-2.0-flash
+GEMINI_MODEL=gemini-2.5-flash
 SERPER_API_KEY=...
 ```
 

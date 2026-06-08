@@ -196,6 +196,15 @@ class ReasoningLoopTests(unittest.TestCase):
         self.assertEqual([step["action"] for step in result.plan], ["finish"])
         self.assertEqual(result.computed_metrics, [])
 
+    def test_loop_stops_repeating_a_tool_that_makes_no_progress(self) -> None:
+        # A planner that fixates on one tool must not spin to the step cap.
+        # The loop should detect that a repeated tool closes no new coverage
+        # gap and stop offering it.
+        with SessionLocal() as db:
+            agent = DealResearchAgent(db, planner=FixedPlanner(["web_research"] * 8))
+            result = agent.update_deal_intelligence(deal_id="d_rogo")
+        self.assertLessEqual(result.tools_used.count("web_research"), 2)
+
     def test_falls_back_to_deterministic_when_planner_unavailable(self) -> None:
         # If the LLM planner cannot be reached, the run must still produce a
         # full, cited report via the deterministic plan -- not an empty one.

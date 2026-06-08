@@ -97,7 +97,7 @@ class LLMReasoningPlanner:
     def __init__(self, api_key: str | None = None, model: str | None = None):
         load_env_file()
         self.api_key = api_key if api_key is not None else os.environ.get("GEMINI_API_KEY")
-        self.model = model or os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
+        self.model = model or os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
 
     @property
     def enabled(self) -> bool:
@@ -164,6 +164,10 @@ Coverage gaps still open (field, status, priority, where it should come from):
 
 Actions already taken this run, in order:
 {json.dumps(context.get('actions_taken', []), indent=2)}
+
+Exhausted actions (already ran and closed no coverage gap -- do NOT pick these
+again; choose a different tool or finish):
+{json.dumps(context.get('exhausted_actions', []), indent=2)}
 
 Most recent tool observations:
 {json.dumps(context.get('last_observations', []), indent=2)}
