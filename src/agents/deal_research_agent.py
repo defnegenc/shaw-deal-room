@@ -13,6 +13,7 @@ from src.services.deal_service import DealService, infer_doc_paths_for_deal
 from src.services.document_processing import DocumentProcessingService
 from src.services.fact_service import FactService
 from src.services.metric_service import MetricService
+from src.services.source_reliability import SourceReliabilityService
 from src.services.web_research import WebResearchService
 from src.utils.ids import new_id
 
@@ -45,6 +46,7 @@ class DealResearchAgent:
         self.metric_service = MetricService(db)
         self.enrichment_service = CompanyEnrichmentService()
         self.web_research_service = WebResearchService()
+        self.reliability_service = SourceReliabilityService(db)
 
     def update_deal_intelligence(
         self,
@@ -72,6 +74,21 @@ class DealResearchAgent:
 
         tools_used.append("inspect_state")
         state = self._inspect_state(deal, doc_paths)
+
+        # Read the deal's audit log for sources a human previously corrected.
+        # The agent uses this to distrust those providers on this run instead
+        # of repeating the same mistake -- the source-reliability feedback loop.
+        tools_used.append("review_source_reliability")
+        reliability = self.reliability_service.context_for_deal(deal.deal_id)
+        trace.append(
+            {
+                "tool": "review_source_reliability",
+                "corrected_providers": sorted(reliability.corrected_providers),
+                "corrected_source_labels": sorted(reliability.corrected_source_labels),
+                "corrections_seen": len(reliability.notes),
+            }
+        )
+
         coverage = self._coverage_for_deal(deal)
         source_strategy = self._source_strategy(deal, coverage)
         source_strategy_trace = list(source_strategy)
@@ -115,6 +132,14 @@ class DealResearchAgent:
                             source_label="mock_company_provider",
                             provider="mock_company_provider",
                             url=deal.company.website,
+                            force_review=SourceReliabilityService.should_force_review(
+                                reliability, "mock_company_provider", "mock_company_provider"
+                            ),
+                            review_reason_override=_unreliable_source_reason(field_name, "mock_company_provider")
+                            if SourceReliabilityService.should_force_review(
+                                reliability, "mock_company_provider", "mock_company_provider"
+                            )
+                            else None,
                         )
                     )
             trace.append({"tool": "enrich_company", "enriched": enriched is not None})
@@ -143,6 +168,9 @@ class DealResearchAgent:
                 }
             )
             result = self.web_research_service.research_company(deal.company.name, deal.company.website, reason, target_fields)
+            web_source_label = "live_web_search" if result.used_live_search else "mock_web_search"
+            web_provider = "serper" if result.used_live_search else "mock_web_search"
+            web_forced = SourceReliabilityService.should_force_review(reliability, web_provider, web_source_label)
             for extracted in result.facts:
                 processed_facts.append(
                     self.fact_service.create_fact_from_extraction(
@@ -150,9 +178,13 @@ class DealResearchAgent:
                         deal_id=deal.deal_id,
                         extracted=extracted,
                         source_type="web_search",
-                        source_label="live_web_search" if result.used_live_search else "mock_web_search",
-                        provider="serper" if result.used_live_search else "mock_web_search",
+                        source_label=web_source_label,
+                        provider=web_provider,
                         url=deal.company.website,
+                        force_review=web_forced,
+                        review_reason_override=_unreliable_source_reason(extracted.field_name, web_provider)
+                        if web_forced
+                        else None,
                     )
                 )
             trace.append(
@@ -469,6 +501,13 @@ class DealResearchAgent:
             coverage_gaps=coverage,
             source_strategy=source_strategy,
         )
+
+
+def _unreliable_source_reason(field_name: str, provider: str) -> str:
+    return (
+        f"{field_name} comes from '{provider}', which an associate previously "
+        f"corrected on this deal. Verify against a stronger source before accepting."
+    )
 
 
 def _fact_dict(fact: Fact) -> dict:

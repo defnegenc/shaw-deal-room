@@ -83,5 +83,39 @@ class HumanCorrectionDurabilityTests(unittest.TestCase):
         self.assertTrue(all(fact.locked for fact in human_facts))
 
 
+class SourceReliabilityFeedbackTests(unittest.TestCase):
+    def setUp(self) -> None:
+        os.environ["GEMINI_API_KEY"] = ""
+        os.environ["SERPER_API_KEY"] = ""
+        build_db()
+
+    def test_corrected_provider_is_distrusted_for_other_fields(self) -> None:
+        # First run: Rogo is researched via the mocked web provider, which
+        # confidently returns `founders` (auto-accepted) among other fields.
+        with SessionLocal() as db:
+            first = DealResearchAgent(db).update_deal_intelligence(deal_id="d_rogo")
+        self.assertTrue(any(fact["field_name"] == "founders" for fact in first.accepted_facts))
+        market = next(item for item in first.review_items if item["field_name"] == "market_position")
+
+        # The associate corrects a DIFFERENT field from that same provider,
+        # which records the provider as having been wrong.
+        with SessionLocal() as db:
+            ReviewResolutionService(db).resolve_review_item(market["review_id"], "Corrected positioning", None)
+
+        # Next run: the agent should now distrust that provider and route its
+        # other facts (e.g. founders) to review instead of auto-accepting.
+        with SessionLocal() as db:
+            DealResearchAgent(db).update_deal_intelligence(deal_id="d_rogo")
+            founders = (
+                db.query(Fact)
+                .filter(Fact.deal_id == "d_rogo", Fact.field_name == "founders")
+                .order_by(Fact.created_at.desc())
+                .first()
+            )
+
+        self.assertIsNotNone(founders)
+        self.assertEqual(founders.review_status, "review_required")
+
+
 if __name__ == "__main__":
     unittest.main()
