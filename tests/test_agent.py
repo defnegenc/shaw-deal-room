@@ -261,5 +261,27 @@ class ReasoningRerunDedupTests(unittest.TestCase):
         self.assertEqual(len(fields), len(set(fields)), f"duplicate fields in accepted_facts: {fields}")
 
 
+class LoadIntelligenceTests(unittest.TestCase):
+    def setUp(self) -> None:
+        os.environ["GEMINI_API_KEY"] = ""
+        os.environ["SERPER_API_KEY"] = ""
+        build_db()
+
+    def test_returns_none_before_any_run(self) -> None:
+        with SessionLocal() as db:
+            self.assertIsNone(DealResearchAgent(db).load_intelligence("d_orbit"))
+
+    def test_returns_stored_results_after_a_run(self) -> None:
+        # A refresh must be able to re-show the same facts the run produced,
+        # rebuilt from the DB without re-running any tool.
+        with SessionLocal() as db:
+            ran = DealResearchAgent(db).update_deal_intelligence(deal_id="d_orbit")
+        with SessionLocal() as db:
+            loaded = DealResearchAgent(db).load_intelligence("d_orbit")
+        self.assertIsNotNone(loaded)
+        self.assertEqual(len(loaded.accepted_facts), len(ran.accepted_facts))
+        self.assertTrue(loaded.plan)
+
+
 if __name__ == "__main__":
     unittest.main()

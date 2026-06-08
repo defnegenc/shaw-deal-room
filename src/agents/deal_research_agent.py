@@ -65,6 +65,32 @@ class DealResearchAgent:
         self.web_research_service = WebResearchService()
         self.reliability_service = SourceReliabilityService(db)
 
+    def load_intelligence(self, deal_id: str) -> AgentResult | None:
+        """Rebuild the report from already-stored data, without running tools.
+
+        Lets the UI re-show a deal's facts/citations/metrics after a refresh
+        instead of forcing a re-run. Returns None if the agent has never
+        completed a run for this deal."""
+        deal = self.db.query(Deal).filter(Deal.deal_id == deal_id).first()
+        if deal is None:
+            return None
+        run = (
+            self.db.query(AgentRun)
+            .filter(AgentRun.deal_id == deal_id, AgentRun.status == "completed")
+            .order_by(AgentRun.completed_at.desc().nullslast())
+            .first()
+        )
+        if run is None:
+            return None
+        data = json.loads(run.trace_json or "{}")
+        plan = data.get("plan", [])
+        coverage = data.get("coverage") or self._coverage_for_deal(deal)
+        source_strategy = data.get("source_strategy", [])
+        tools_used = json.loads(run.tools_used or "[]")
+        result = self._build_result(run.run_id, deal, tools_used, plan, coverage, source_strategy)
+        self.db.commit()
+        return result
+
     def update_deal_intelligence(
         self,
         deal_id: str | None = None,

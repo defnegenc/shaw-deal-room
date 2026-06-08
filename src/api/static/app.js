@@ -120,6 +120,7 @@ async function selectDeal(dealId) {
   resetAgentOutput();
   await loadSourceDocuments();
   await loadEvents();
+  await loadIntelligence();
   els.pipelineView.classList.add("hidden");
   els.dealWorkspace.classList.remove("hidden");
   // A company is selected, so the top-bar Run Agent becomes clickable.
@@ -260,6 +261,45 @@ function liveStepItem(title, body, tone, showSpinner) {
   `;
 }
 
+// Map each accepted fact back to the tool that produced it (via its citation
+// source) so each pipeline step can show what it actually found, e.g.
+// "web_research → Found founding year = 2023; founders = ...".
+function actionForSource(label) {
+  const value = (label || "").toLowerCase();
+  if (value.includes("web") || value.includes("serper")) return "web_research";
+  if (value.includes("enrich") || value.includes("company_provider")) return "enrich_company";
+  if (value.includes("chunk") || /\.(txt|md|pdf|csv|xlsx|xlsm)/.test(value)) return "process_documents";
+  return null;
+}
+
+function findingsByAction(result) {
+  const valueByField = {};
+  for (const fact of result.accepted_facts) {
+    valueByField[fact.field_name] = formatValue(fact);
+  }
+  const byAction = {};
+  for (const citation of result.citations) {
+    const action = actionForSource(citation.source_label);
+    if (!action || valueByField[citation.field_name] === undefined) continue;
+    let value = String(valueByField[citation.field_name]);
+    if (value.length > 60) value = `${value.slice(0, 57)}...`;
+    (byAction[action] = byAction[action] || new Set()).add(`${labelAction(citation.field_name)} = ${value}`);
+  }
+  const out = {};
+  for (const action of Object.keys(byAction)) out[action] = [...byAction[action]];
+  return out;
+}
+
+async function loadIntelligence() {
+  const deal = currentDeal();
+  if (!deal) return;
+  const data = await apiFetch(`/deals/${deal.deal_id}/intelligence`);
+  if (data.has_run) {
+    renderResult(data);
+    els.postRunArea.classList.remove("hidden");
+  }
+}
+
 function renderResult(result) {
   els.planCount.textContent = result.plan.length;
   els.citationCount.textContent = result.citations.length;
@@ -267,9 +307,16 @@ function renderResult(result) {
   els.reviewCount.textContent = result.review_items.length;
   els.metricCount.textContent = result.computed_metrics.length;
 
+  const findings = findingsByAction(result);
   els.agentActions.className = "action-timeline";
   els.agentActions.innerHTML = result.plan.length
-    ? result.plan.map((step, index) => actionItem(`${index + 1}. ${labelAction(step.action)}`, step.reason, "done")).join("")
+    ? result.plan
+        .map((step, index) => {
+          const found = findings[step.action];
+          const body = found && found.length ? `${step.reason} → Found ${found.join("; ")}` : step.reason;
+          return actionItem(`${index + 1}. ${labelAction(step.action)}`, body, "done");
+        })
+        .join("")
     : actionItem("No follow-up actions", "The agent did not find anything else to do.", "done");
   if (result.source_strategy?.length) {
     els.agentActions.innerHTML += result.source_strategy

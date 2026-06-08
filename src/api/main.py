@@ -233,6 +233,16 @@ def download_source_document(deal_id: str, filename: str = Query(...), db: Sessi
     return FileResponse(path, media_type="text/plain", filename=path.name)
 
 
+@app.get("/deals/{deal_id}/intelligence")
+def get_deal_intelligence(deal_id: str, db: Session = Depends(get_db)) -> dict:
+    """Return the stored agent results for a deal so the UI can re-show them
+    after a page refresh without re-running the agent."""
+    result = DealResearchAgent(db).load_intelligence(deal_id)
+    if result is None:
+        return {"has_run": False}
+    return {"has_run": True, **asdict(result)}
+
+
 @app.post("/agent-runs/update-deal-intelligence")
 def update_deal_intelligence(payload: AgentRunRequest, db: Session = Depends(get_db)) -> dict:
     try:
