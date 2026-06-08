@@ -24,6 +24,15 @@ def init_db() -> None:
     _apply_sqlite_compat_migrations()
 
 
+def reset_db() -> None:
+    """Drop every table and recreate the schema — a clean slate for the demo."""
+    from src.database.models import Base
+
+    Base.metadata.drop_all(bind=engine)
+    Base.metadata.create_all(bind=engine)
+    _apply_sqlite_compat_migrations()
+
+
 def _apply_sqlite_compat_migrations() -> None:
     with engine.begin() as connection:
         review_columns = {row[1] for row in connection.exec_driver_sql("PRAGMA table_info(review_items)").fetchall()}

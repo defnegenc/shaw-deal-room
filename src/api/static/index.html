@@ -23,6 +23,7 @@
       </section>
 
       <form id="createDealForm" class="create-form hidden">
+        <p class="create-hint">💡 Add <strong>any</strong> startup — with a Gemini + Serper key set, the agent researches it live from the web. Company name is enough; a website helps.</p>
         <input name="company_name" placeholder="Company name" required />
         <input name="website" placeholder="Website (optional)" />
         <select name="stage" aria-label="Stage">
@@ -57,18 +58,20 @@
 
       <section id="dealWorkspace" class="workspace hidden">
         <section class="panel">
-          <div class="workspace-head">
+          <div class="panel-head">
             <div>
               <p class="label">Current Deal</p>
               <h2 id="companyName">-</h2>
             </div>
+            <button id="editDealButton" type="button" class="secondary-button">✎ Edit details</button>
           </div>
           <dl class="deal-state">
             <div><dt>Stage</dt><dd id="dealStage">-</dd></div>
             <div><dt>Status</dt><dd id="dealStatus">-</dd></div>
+            <div><dt>Website</dt><dd id="dealWebsite">-</dd></div>
             <div><dt>Initial Contact</dt><dd id="dealContact">-</dd></div>
           </dl>
-          <form id="editDealForm" class="edit-form">
+          <form id="editDealForm" class="edit-form hidden">
             <input name="company_name" placeholder="Company name" required />
             <input name="website" placeholder="Website (optional)" />
             <select name="stage" aria-label="Stage">

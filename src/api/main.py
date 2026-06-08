@@ -1,5 +1,6 @@
 from dataclasses import asdict
 import logging
+import os
 from pathlib import Path
 import re
 
@@ -12,7 +13,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from src.agents.deal_research_agent import DealResearchAgent
-from src.database.connection import get_db, init_db
+from src.database.connection import get_db, init_db, reset_db
 from src.database.models import Company, Deal, DealEvent
 from src.parsers.document_parser import normalize_document_type
 from src.services.deal_service import DealService, infer_doc_paths_for_deal, log_deal_event
@@ -54,7 +55,13 @@ class ResolveReviewRequest(BaseModel):
 
 @app.on_event("startup")
 def startup() -> None:
-    init_db()
+    # The demo resets to a clean seeded state on every startup so accumulated
+    # test companies and stale data never leak between sessions. Set
+    # DEAL_ROOM_RESET=0 to keep data across restarts (e.g. a persistent deploy).
+    if os.environ.get("DEAL_ROOM_RESET", "1") != "0":
+        reset_db()
+    else:
+        init_db()
     for db in get_db():
         seed_if_empty(db)
 

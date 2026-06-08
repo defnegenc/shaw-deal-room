@@ -245,6 +245,17 @@ button:disabled {
   box-shadow: var(--shadow-sm);
 }
 
+.create-hint {
+  grid-column: 1 / -1;
+  margin: 0 0 4px;
+  padding: 10px 12px;
+  background: var(--accent-soft);
+  border: 1px solid #dfe3fb;
+  border-radius: var(--r-sm);
+  color: var(--ink-soft);
+  font-size: 13px;
+}
+
 .edit-form {
   grid-template-columns: minmax(160px, 1.2fr) minmax(160px, 1fr) minmax(130px, 0.8fr) minmax(120px, 0.7fr) minmax(160px, 1fr) auto;
   margin-top: 18px;

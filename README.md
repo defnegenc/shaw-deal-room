@@ -148,6 +148,10 @@ python -m uvicorn src.api.main:app --host 0.0.0.0 --port ${PORT:-8000}
 GEMINI_API_KEY=...
 GEMINI_MODEL=gemini-2.5-flash
 SERPER_API_KEY=...
+# Optional. The app resets to a clean seeded state on every startup by default
+# so demo sessions never accumulate stale data. Set DEAL_ROOM_RESET=0 to keep
+# data across restarts.
+DEAL_ROOM_RESET=1
 ```
 
 The deployed app will be available at:
@@ -156,7 +160,11 @@ The deployed app will be available at:
 https://your-railway-domain/ui
 ```
 
-Important caveat: the MVP uses SQLite on the app filesystem. That is fine for a take-home demo, and the app seeds sample deals if the DB is empty. For production, use Postgres so created deals and review decisions persist across deploys and restarts.
+Important caveat: the MVP uses SQLite on the app filesystem and, by default,
+resets to the seeded demo companies on every startup (`DEAL_ROOM_RESET=1`). That
+keeps the demo clean but means companies you add do not survive a restart. For a
+persistent multi-user deployment, set `DEAL_ROOM_RESET=0` and move to Postgres so
+created deals and review decisions persist across deploys and restarts.
 
 ## GenAI Usage Disclosure
 

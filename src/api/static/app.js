@@ -30,7 +30,9 @@ const els = {
   companyName: document.getElementById("companyName"),
   dealStage: document.getElementById("dealStage"),
   dealStatus: document.getElementById("dealStatus"),
+  dealWebsite: document.getElementById("dealWebsite"),
   dealContact: document.getElementById("dealContact"),
+  editDealButton: document.getElementById("editDealButton"),
   editDealForm: document.getElementById("editDealForm"),
   editDealMessage: document.getElementById("editDealMessage"),
   deleteDealButton: document.getElementById("deleteDealButton"),
@@ -129,7 +131,10 @@ function renderSelectedDeal() {
   els.companyName.textContent = deal.company_name;
   els.dealStage.textContent = deal.stage;
   els.dealStatus.textContent = deal.status;
-  els.dealContact.textContent = deal.initial_contact || "-";
+  els.dealWebsite.textContent = deal.website || "—";
+  els.dealContact.textContent = deal.initial_contact || "—";
+  els.editDealForm.classList.add("hidden");
+  els.editDealMessage.textContent = "";
   els.editDealForm.elements.company_name.value = deal.company_name || "";
   els.editDealForm.elements.website.value = deal.website || "";
   els.editDealForm.elements.stage.value = deal.stage || "Sourced";
@@ -565,6 +570,10 @@ els.toggleCreateButton.addEventListener("click", () => {
   els.createDealForm.classList.toggle("hidden");
 });
 els.createDealForm.addEventListener("submit", createDeal);
+els.editDealButton.addEventListener("click", () => {
+  const hidden = els.editDealForm.classList.toggle("hidden");
+  if (!hidden) els.editDealForm.elements.company_name.focus();
+});
 els.editDealForm.addEventListener("submit", updateDeal);
 els.deleteDealButton.addEventListener("click", deleteDeal);
 els.uploadForm.addEventListener("submit", uploadDocument);
