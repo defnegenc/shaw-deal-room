@@ -134,9 +134,7 @@ These are deliberate prototype boundaries. Listed so they are explicit.
   calls; production should use a header so keys don't land in logs.
 - **Document regex extraction is format-locked** to the seed documents'
   `Label: value` style and will not generalize to arbitrary PDFs; the Gemini
-  lane is the real path for messy documents. The money-scaling helper only
-  handles `K`/`M` suffixes (not `B`), so a `$1.2B` in a *document* would mis-parse
-  — web research handles billions, documents do not yet.
+  lane is the real path for messy documents. (Money scaling handles `K`/`M`/`B`.)
 - **SQLite on the app filesystem** is ephemeral on Railway; production needs
   Postgres.
 

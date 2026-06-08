@@ -19,12 +19,12 @@ class ExtractedFact:
 
 
 MONEY_FIELDS = {
-    "arr": [r"\bARR:\s*\$?([\d.]+)\s*([MK])?\b"],
-    "monthly_burn": [r"\bMonthly burn:\s*\$?([\d.]+)\s*([MK])?\b"],
-    "target_raise": [r"\bTarget raise:\s*\$?([\d.]+)\s*([MK])?\b"],
-    "pre_money_valuation": [r"\bPre-money valuation:\s*\$?([\d.]+)\s*([MK])?\b"],
-    "post_money_valuation": [r"\bPost-money valuation:\s*\$?([\d.]+)\s*([MK])?\b"],
-    "investment_amount": [r"\bInvestment amount:\s*\$?([\d.]+)\s*([MK])?\b"],
+    "arr": [r"\bARR:\s*\$?([\d.]+)\s*([MKB])?\b"],
+    "monthly_burn": [r"\bMonthly burn:\s*\$?([\d.]+)\s*([MKB])?\b"],
+    "target_raise": [r"\bTarget raise:\s*\$?([\d.]+)\s*([MKB])?\b"],
+    "pre_money_valuation": [r"\bPre-money valuation:\s*\$?([\d.]+)\s*([MKB])?\b"],
+    "post_money_valuation": [r"\bPost-money valuation:\s*\$?([\d.]+)\s*([MKB])?\b"],
+    "investment_amount": [r"\bInvestment amount:\s*\$?([\d.]+)\s*([MKB])?\b"],
 }
 
 NUMBER_FIELDS = {
@@ -191,10 +191,9 @@ def extract_facts(text: str) -> list[ExtractedFact]:
 
 def _scaled_number(value: str, suffix: str | None) -> float:
     number = float(value)
-    if suffix and suffix.upper() == "M":
-        return number * 1_000_000
-    if suffix and suffix.upper() == "K":
-        return number * 1_000
+    multiplier = {"K": 1_000, "M": 1_000_000, "B": 1_000_000_000}
+    if suffix:
+        return number * multiplier.get(suffix.upper(), 1)
     return number
 
 
