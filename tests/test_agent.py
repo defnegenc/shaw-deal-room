@@ -1,10 +1,11 @@
 import unittest
 import os
+from unittest.mock import patch
 
 from scripts.build_db import build_db
 from src.agents.deal_research_agent import DealResearchAgent
 from src.database.connection import SessionLocal
-from src.database.models import Fact
+from src.database.models import AgentRun, Fact
 from src.services.review_resolution import ReviewResolutionService
 
 
@@ -115,6 +116,49 @@ class SourceReliabilityFeedbackTests(unittest.TestCase):
 
         self.assertIsNotNone(founders)
         self.assertEqual(founders.review_status, "review_required")
+
+
+class RunAtomicityTests(unittest.TestCase):
+    def setUp(self) -> None:
+        os.environ["GEMINI_API_KEY"] = ""
+        os.environ["SERPER_API_KEY"] = ""
+        build_db()
+
+    def test_failed_run_preserves_state_and_records_failure(self) -> None:
+        # Establish committed state, including a locked human fact.
+        with SessionLocal() as db:
+            first = DealResearchAgent(db).update_deal_intelligence(deal_id="d_orbit")
+        review = next(item for item in first.review_items if item["field_name"] == "headcount")
+        with SessionLocal() as db:
+            ReviewResolutionService(db).resolve_review_item(review["review_id"], "37 employees", None)
+
+        with SessionLocal() as db:
+            facts_before = db.query(Fact).filter(Fact.deal_id == "d_orbit").count()
+
+        # A run that blows up midway (after the wipe + re-extraction) must not
+        # leave the deal in a half-rebuilt state.
+        with SessionLocal() as db:
+            agent = DealResearchAgent(db)
+            with patch.object(agent.metric_service, "compute_for_deal", side_effect=RuntimeError("boom")):
+                with self.assertRaises(RuntimeError):
+                    agent.update_deal_intelligence(deal_id="d_orbit")
+
+        with SessionLocal() as db:
+            facts_after = db.query(Fact).filter(Fact.deal_id == "d_orbit").count()
+            human = (
+                db.query(Fact)
+                .filter(Fact.deal_id == "d_orbit", Fact.extraction_method == "associate_correction")
+                .count()
+            )
+            failed_runs = (
+                db.query(AgentRun)
+                .filter(AgentRun.deal_id == "d_orbit", AgentRun.status == "failed")
+                .count()
+            )
+
+        self.assertEqual(facts_after, facts_before, "a failed run corrupted the fact set")
+        self.assertEqual(human, 1, "the locked human correction was lost")
+        self.assertEqual(failed_runs, 1, "the failed run was not recorded in the audit trail")
 
 
 if __name__ == "__main__":

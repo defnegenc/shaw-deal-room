@@ -55,7 +55,20 @@ class DealResearchAgent:
         website: str | None = None,
         doc_paths: list[str] | None = None,
     ) -> AgentResult:
+        # Resolve the deal outside the transactional body: a missing deal is a
+        # caller error, not a run failure worth recording.
         deal = self._resolve_deal(deal_id, company_name, website)
+        try:
+            return self._run(deal, doc_paths)
+        except Exception as exc:
+            # The whole run is one unit of work. On any failure, discard the
+            # half-rebuilt state and record the failure in the audit trail so a
+            # run is never silently lost.
+            self.db.rollback()
+            self._record_failed_run(deal, exc)
+            raise
+
+    def _run(self, deal: Deal, doc_paths: list[str] | None) -> AgentResult:
         self.deal_service.clear_generated_intelligence(deal.deal_id)
         run = AgentRun(
             run_id=new_id("run"),
@@ -218,6 +231,20 @@ class DealResearchAgent:
         self.db.commit()
 
         return self._build_result(run.run_id, deal, tools_used, plan, coverage, source_strategy_trace)
+
+    def _record_failed_run(self, deal: Deal, exc: Exception) -> None:
+        self.db.add(
+            AgentRun(
+                run_id=new_id("run"),
+                deal_id=deal.deal_id,
+                objective="update_deal_intelligence",
+                status="failed",
+                tools_used="[]",
+                trace_json=json.dumps({"error": f"{type(exc).__name__}: {exc}"}),
+                completed_at=datetime.utcnow(),
+            )
+        )
+        self.db.commit()
 
     def _resolve_deal(self, deal_id: str | None, company_name: str | None, website: str | None) -> Deal:
         if deal_id:
