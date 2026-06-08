@@ -1,0 +1,21 @@
+OrbitGrid AI investor update
+Document type: Pitch Deck
+As of: 2026-03-31
+
+OrbitGrid AI builds orchestration software for distributed energy storage operators.
+Headquarters: Austin, TX
+Team size: 42 employees
+
+Financial snapshot:
+ARR: $12.4M as of Q1 2026
+Revenue growth: 118% year over year
+Gross margin: 72%
+Monthly burn: $850K
+Runway: 18 months
+
+Fundraise:
+Current round: Series A
+Target raise: $18M
+Pre-money valuation: $80M
+
+Key customers include three regional utilities and two battery fleet operators.

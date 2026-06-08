@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AI Deal Room</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="topbar">
+        <div>
+          <p class="eyebrow">Associate Workbench</p>
+          <h1>AI Deal Room</h1>
+        </div>
+        <button id="toggleCreateButton" type="button" class="secondary-button">Add Company</button>
+      </section>
+
+      <form id="createDealForm" class="create-form hidden">
+        <input name="company_name" placeholder="Company name" required />
+        <input name="website" placeholder="Website (optional)" />
+        <select name="stage" aria-label="Stage">
+          <option>Sourced</option>
+          <option>Screening</option>
+          <option>Due Diligence</option>
+          <option>IC Review</option>
+          <option>Term Sheet</option>
+          <option>Closed</option>
+          <option>Passed</option>
+        </select>
+        <select name="status" aria-label="Status">
+          <option>Active</option>
+          <option>Paused</option>
+          <option>Closed</option>
+          <option>Passed</option>
+        </select>
+        <input name="initial_contact" placeholder="Initial contact (optional)" />
+        <button type="submit">Add Company</button>
+      </form>
+      <p id="createDealMessage" class="top-message"></p>
+
+      <section id="pipelineView" class="panel pipeline-panel">
+        <div class="panel-head">
+          <div>
+            <p class="label">Pipeline at a Glance</p>
+            <h2>Select a company to inspect the deal room</h2>
+          </div>
+        </div>
+        <div id="pipelineBoard" class="pipeline-board"></div>
+      </section>
+
+      <section id="dealWorkspace" class="workspace hidden">
+        <section class="panel">
+          <div class="workspace-head">
+            <button id="backButton" type="button" class="secondary-button">Back to Pipeline</button>
+            <div>
+              <p class="label">Current Deal</p>
+              <h2 id="companyName">-</h2>
+            </div>
+          </div>
+          <dl class="deal-state">
+            <div><dt>Stage</dt><dd id="dealStage">-</dd></div>
+            <div><dt>Status</dt><dd id="dealStatus">-</dd></div>
+            <div><dt>Initial Contact</dt><dd id="dealContact">-</dd></div>
+          </dl>
+          <form id="editDealForm" class="edit-form">
+            <input name="company_name" placeholder="Company name" required />
+            <input name="website" placeholder="Website (optional)" />
+            <select name="stage" aria-label="Stage">
+              <option>Sourced</option>
+              <option>Screening</option>
+              <option>Due Diligence</option>
+              <option>IC Review</option>
+              <option>Term Sheet</option>
+              <option>Closed</option>
+              <option>Passed</option>
+            </select>
+            <select name="status" aria-label="Status">
+              <option>Active</option>
+              <option>Paused</option>
+              <option>Closed</option>
+              <option>Passed</option>
+            </select>
+            <input name="initial_contact" placeholder="Initial contact (optional)" />
+            <button type="submit">Save Changes</button>
+            <button id="deleteDealButton" type="button" class="danger-button">Delete</button>
+          </form>
+          <p id="editDealMessage" class="form-message"></p>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <p class="label">Diligence Materials</p>
+              <h2 id="materialsSummary">-</h2>
+            </div>
+            <span id="documentCount" class="count">0</span>
+          </div>
+          <div id="sourceDocuments" class="doc-list empty">Select a deal to view source documents.</div>
+          <form id="uploadForm" class="upload-form">
+            <input id="documentFile" name="file" type="file" accept=".txt,.md,.pdf,.xlsx,.xlsm,.csv,.png,.jpg,.jpeg,.webp,.heic" />
+            <input name="doc_type" placeholder="Label: email screenshot, Excel sheet, handwritten note..." />
+            <button type="submit">Upload</button>
+          </form>
+          <p id="uploadMessage" class="form-message"></p>
+        </section>
+
+        <section class="actions-row">
+          <button id="runButton" class="primary-large">Run Agent</button>
+          <button id="uploadButton" class="secondary-large" type="button">Upload More Documents</button>
+        </section>
+
+        <section id="agentResults" class="results hidden">
+          <section class="panel">
+            <div class="panel-head">
+              <h2>Agent Actions</h2>
+              <span id="planCount" class="count">0</span>
+            </div>
+            <div id="agentActions" class="action-timeline empty">Run the agent to see the sequence of actions.</div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <h2>Citations</h2>
+              <span id="citationCount" class="count">0</span>
+            </div>
+            <div id="citations" class="citation-list empty">No citations yet.</div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <h2>Accepted Facts</h2>
+              <span id="factCount" class="count">0</span>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Field</th>
+                    <th>Value</th>
+                    <th>Status</th>
+                    <th>Freshness</th>
+                  </tr>
+                </thead>
+                <tbody id="factsTable"></tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <h2>Needs Human Review</h2>
+              <span id="reviewCount" class="count warn">0</span>
+            </div>
+            <div id="reviewItems" class="stack empty">No review items.</div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <h2>Computed Metrics</h2>
+              <span id="metricCount" class="count">0</span>
+            </div>
+            <div id="computedMetrics" class="stack empty">No computed metrics yet.</div>
+          </section>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Change Log</h2>
+            <span id="eventCount" class="count">0</span>
+          </div>
+          <div id="eventLog" class="stack empty">No changes yet.</div>
+        </section>
+      </section>
+    </main>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>

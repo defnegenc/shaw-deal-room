@@ -1,0 +1,30 @@
+graph TD
+    A[Investment Associate] --> CLI[Enhanced CLI]
+    A --> API[FastAPI Swagger Docs]
+    CLI --> Agent[Planning Agent]
+    API --> Agent
+
+    Agent --> State[Inspect Deal State]
+    State --> DB[(SQLite via SQLAlchemy)]
+    State --> Stale[Check Missing and Stale Metrics]
+
+    Agent --> Uploads[Process Uploaded Documents]
+    Uploads --> Files[(Local Document Store)]
+    Uploads --> Extract[Extract Document Facts]
+
+    Agent --> Enrich[Mock Company Enrichment]
+    Agent --> Compute[Compute Growth and Multiples]
+    Agent --> Conflict[Detect Conflicts]
+
+    Extract --> FactSvc[Fact and Source Service]
+    Enrich --> FactSvc
+    Compute --> FactSvc
+    Conflict --> Review[Review Item Service]
+    Stale --> Review
+
+    FactSvc --> DB
+    Review --> DB
+
+    DB --> Output[Deal Intelligence Report]
+    Output --> Flags[Accepted Facts Citations Confidence Stale Flags Conflicts]
+    Flags --> A

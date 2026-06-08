@@ -1,0 +1,18 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.db
+*.db-journal
+.env
+.DS_Store
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# Local editor / agent settings and stray files
+.claude/settings.local.json
+Untitled

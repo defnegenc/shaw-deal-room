@@ -1,0 +1,26 @@
+graph TD
+    Doc[Uploaded Document or Enrichment Source] --> Extract[Extract Fact or Metric]
+    Extract --> Source[Attach Source Citation]
+    Source --> Score[Assign Confidence Score]
+    Score --> ConflictCheck[Check Existing Facts]
+
+    ConflictCheck --> HasConflict{Conflict Found}
+    HasConflict -->|Yes| Conflict[Create Conflict Record]
+    Conflict --> Review[Create Review Item]
+
+    HasConflict -->|No| ConfidenceCheck{Confidence At Least 0.80}
+    ConfidenceCheck -->|Yes| Accepted[Mark Accepted]
+    ConfidenceCheck -->|No| LowConfidence[Flag Low Confidence]
+    LowConfidence --> Review
+
+    Accepted --> MetricCheck{Is Metric Observation}
+    MetricCheck -->|Yes| StaleCheck[Check As Of Date]
+    MetricCheck -->|No| Store[Store Fact]
+
+    StaleCheck --> IsStale{Older Than Six Months}
+    IsStale -->|Yes| Stale[Flag Stale]
+    Stale --> Review
+    IsStale -->|No| Store
+
+    Store --> Report[Deal Intelligence Report]
+    Review --> Report

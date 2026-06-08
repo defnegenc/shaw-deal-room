@@ -1,0 +1,4 @@
+company_id,company_name,website,deal_id,stage,owner,source,priority,status,initial_contact
+co_orbit,OrbitGrid AI,https://orbitgrid.example,d_orbit,Due Diligence,Alex Rivera,Founder intro,High,Active,maya@orbitgrid.example
+co_nova,NovaLedger,https://novaledger.example,d_nova,Sourced,Jordan Lee,VC referral,Medium,Active,founders@novaledger.example
+co_rogo,Rogo,https://rogo.ai,d_rogo,Sourced,Alex Rivera,Associate sourced,High,Active,hello@rogo.ai
