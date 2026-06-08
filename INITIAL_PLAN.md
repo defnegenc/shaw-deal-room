@@ -1,5 +1,10 @@
 # AI Deal Room MVP - Initial Architecture Plan
 
+> **Historical document.** This is the original pre-build plan describing the
+> first deterministic orchestrator design. The agent has since gained an LLM
+> reasoning loop and several correctness fixes. For the current design see
+> `ARCHITECTURE.md`; for what changed and why see `AUDIT_AND_FIXES.md`.
+
 ## Goal
 
 Design and prototype a lightweight internal AI Deal Room for an early-stage tech investing team. The MVP focuses exclusively on the Investment Associate/Analyst doing due diligence: collecting company information, processing deal documents, reconciling data quality issues, and producing a cited deal intelligence report.

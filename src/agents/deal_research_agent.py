@@ -39,6 +39,10 @@ class AgentResult:
 
 MAX_REASONING_STEPS = 8
 
+# Tools that re-process the same fixed inputs and so never benefit from running
+# more than once in a single pass (re-running only creates duplicate facts).
+SINGLE_SHOT_TOOLS = frozenset({"process_documents", "enrich_company"})
+
 
 class DealResearchAgent:
     def __init__(self, db: Session, planner=None):
@@ -236,8 +240,9 @@ class DealResearchAgent:
             )
             observations.append({"action": decision.action, "observation": observation})
             gaps_after = {item["field_name"] for item in self._coverage_for_deal(deal) if item["status"] != "accepted"}
-            if not (gaps_before - gaps_after):
-                # This tool closed no new coverage gap; don't run it again.
+            if decision.action in SINGLE_SHOT_TOOLS or not (gaps_before - gaps_after):
+                # Single-shot tools re-process fixed inputs; others that closed
+                # no new coverage gap won't help on a repeat. Don't run again.
                 exhausted.add(decision.action)
 
         run.status = "completed"

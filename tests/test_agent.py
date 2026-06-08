@@ -205,6 +205,15 @@ class ReasoningLoopTests(unittest.TestCase):
             result = agent.update_deal_intelligence(deal_id="d_rogo")
         self.assertLessEqual(result.tools_used.count("web_research"), 2)
 
+    def test_single_shot_tools_do_not_re_run(self) -> None:
+        # process_documents re-running re-extracts the same files into
+        # duplicate facts. A planner that picks it twice should only execute
+        # it once (orbit has 3 documents -> 3 extractions, not 6).
+        with SessionLocal() as db:
+            agent = DealResearchAgent(db, planner=FixedPlanner(["process_documents", "process_documents", "finish"]))
+            result = agent.update_deal_intelligence(deal_id="d_orbit")
+        self.assertEqual(result.tools_used.count("extract_document_facts"), 3)
+
     def test_falls_back_to_deterministic_when_planner_unavailable(self) -> None:
         # If the LLM planner cannot be reached, the run must still produce a
         # full, cited report via the deterministic plan -- not an empty one.

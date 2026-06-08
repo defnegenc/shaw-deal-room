@@ -10,35 +10,40 @@ The prototype optimizes for one workflow: update a deal's intelligence from loca
 
 ```mermaid
 graph TD
-    A[Investment Associate] --> CLI[Enhanced CLI]
-    A --> API[FastAPI Swagger Docs]
-    CLI --> Agent[Planning Agent]
+    A[Investment Associate] --> CLI[CLI]
+    A --> API[FastAPI + Browser UI]
+    CLI --> Agent[Deal Research Agent]
     API --> Agent
 
-    Agent --> State[Inspect Deal State]
-    State --> DB[(SQLite via SQLAlchemy)]
-    State --> Stale[Check Missing and Stale Metrics]
+    Agent --> Planner{Planner mode}
+    Planner -->|GEMINI_API_KEY set| LLM[LLM Reasoning Loop - Gemini]
+    Planner -->|no key or unreachable| Det[Deterministic Fallback Plan]
 
-    Agent --> Uploads[Process Uploaded Documents]
-    Uploads --> Files[(Local Document Store)]
-    Uploads --> Extract[Extract Document Facts]
+    LLM --> Audit[Read Audit Log and Source Reliability]
+    Det --> Audit
+    Audit --> Loop((decide - run one tool - re-sense coverage))
 
-    Agent --> Enrich[Mock Company Enrichment]
-    Agent --> Compute[Compute Growth and Multiples]
-    Agent --> Conflict[Detect Conflicts]
+    Loop --> T1[process_documents]
+    Loop --> T2[enrich_company]
+    Loop --> T3[web_research]
+    Loop --> T4[detect_conflicts]
+    Loop --> T5[compute_metrics]
+    Loop --> T6[check_staleness]
 
-    Extract --> FactSvc[Fact and Source Service]
-    Enrich --> FactSvc
-    Compute --> FactSvc
-    Conflict --> Review[Review Item Service]
-    Stale --> Review
-
-    FactSvc --> DB
+    T1 --> FactSvc[Fact and Source Service - cited, scored]
+    T2 --> FactSvc
+    T3 --> FactSvc
+    FactSvc --> DB[(SQLite via SQLAlchemy)]
+    T4 --> DB
+    T5 --> DB
+    T6 --> Review[Review Items]
     Review --> DB
 
     DB --> Output[Deal Intelligence Report]
-    Output --> Flags[Accepted Facts Citations Confidence Stale Flags Conflicts]
+    Output --> Flags[Accepted Facts, Citations, Conflicts, Stale, Review Queue]
     Flags --> A
+
+    Review -. human correction locks fact and distrusts source .-> Audit
 ```
 
 ## Core Data Model

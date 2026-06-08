@@ -160,18 +160,36 @@ Important caveat: the MVP uses SQLite on the app filesystem. That is fine for a 
 
 ## GenAI Usage Disclosure
 
-> Please confirm/adjust this section so it reflects your own process before submitting.
+Two GenAI tools were used on this project:
 
-Two GenAI tools were used:
+**ChatGPT / Codex** — initial architecture planning, scaffolding of the data
+model and services, and a first draft of the deterministic pipeline.
 
-- **ChatGPT / Codex** — initial architecture planning, scaffolding, and a first
-  draft of the implementation.
-- **Claude Code (Claude Opus / Sonnet)** — a full audit of the agent pipeline
-  and the subsequent fixes: preserving human-authored facts across runs, wiring
-  the source-reliability feedback loop, run atomicity, and the LLM reasoning
-  loop (the agentic core). See `AUDIT_AND_FIXES.md` for the per-change record.
+**Claude Code (Claude Opus 4.x / Sonnet)** — a full audit of the agent pipeline
+followed by the fixes and the agentic build-out. Specifically:
+- preserving human-authored (`locked`) facts across agent runs so corrections
+  are not wiped and re-validated;
+- wiring the source-reliability feedback loop (the agent reads the deal audit
+  log and distrusts previously-corrected providers);
+- making a run atomic and recording failed runs;
+- adding the **LLM reasoning loop** (the agentic core) with a deterministic
+  fallback and a no-progress guard;
+- the architecture/audit documentation.
 
-Main prompts were, in effect: "audit the agentic pipeline, surface where it
-falls short of the brief, and fix it" and "make it a genuine reasoning loop, not
-hardcoded rules." All design and implementation choices were reviewed with an
+The work was done test-first; see `AUDIT_AND_FIXES.md` for the per-change record
+mapped to commits.
+
+Representative prompts:
+- "Do a whole audit of the agentic pipeline and tell me where it could be way
+  better" — and, on the findings, "before flagging, fix them and document the
+  fixes."
+- "Why doesn't it have an agentic reasoning loop? It should reason through which
+  tools to use instead of deterministic rules."
+- "Make sure the modeling of evolving data, how documents fit the schema, and
+  how conflicting data is reconciled are all accounted for; do a security
+  review; and make sure it actually reduces manual work."
+- "Make any data-structure changes needed to support the new pipeline —
+  scalable but simple enough to be useful."
+
+All design and implementation choices were reviewed by the author with an
 emphasis on keeping the prototype narrow, auditable, and provenance-first.
