@@ -40,7 +40,22 @@ class FactService:
         url: str | None = None,
         force_review: bool = False,
         review_reason_override: str | None = None,
+        locked: bool = False,
     ) -> Fact:
+        # A field settled by a human (locked) is canonical. An automated
+        # re-extraction must not create a competing fact or re-open review for
+        # it on every run -- that is exactly the "re-validate everything"
+        # behavior we are eliminating. Human-authored writes (locked=True) are
+        # always allowed through.
+        if not locked:
+            existing_locked = (
+                self.db.query(Fact)
+                .filter(Fact.deal_id == deal_id, Fact.field_name == extracted.field_name, Fact.locked.is_(True))
+                .first()
+            )
+            if existing_locked is not None:
+                return existing_locked
+
         review_status = "accepted" if extracted.confidence_score >= self.confidence_threshold else "review_required"
         if extracted.extraction_method in REVIEW_FIRST_METHODS:
             review_status = "review_required"
@@ -64,6 +79,7 @@ class FactService:
             confidence_score=extracted.confidence_score,
             review_status=review_status,
             staleness_status=staleness_status,
+            locked=locked,
         )
         self.db.add(fact)
         self.db.flush()
@@ -98,6 +114,7 @@ class FactService:
                     confidence_score=extracted.confidence_score,
                     review_status=review_status,
                     staleness_status=staleness_status,
+                    locked=locked,
                 )
             )
 

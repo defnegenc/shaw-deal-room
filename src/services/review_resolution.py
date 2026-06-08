@@ -42,6 +42,7 @@ class ReviewResolutionService:
             extracted=extracted,
             source_type="manual_review",
             source_label="associate_review",
+            locked=True,
         )
         fact.review_status = "accepted"
         review.status = "resolved"

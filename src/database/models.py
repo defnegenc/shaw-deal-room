@@ -1,6 +1,6 @@
 from datetime import date, datetime
 
-from sqlalchemy import Date, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -105,6 +105,9 @@ class Fact(Base):
     confidence_score: Mapped[float] = mapped_column(Float, nullable=False)
     review_status: Mapped[str] = mapped_column(String, default="proposed")
     staleness_status: Mapped[str] = mapped_column(String, default="current")
+    # Human-authored facts (associate corrections, accepted-after-review) are
+    # locked: they are canonical for their field and survive agent re-runs.
+    locked: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
@@ -140,6 +143,8 @@ class MetricObservation(Base):
     confidence_score: Mapped[float] = mapped_column(Float, nullable=False)
     review_status: Mapped[str] = mapped_column(String, default="proposed")
     staleness_status: Mapped[str] = mapped_column(String, default="current")
+    # Mirrors Fact.locked for observations derived from human-authored facts.
+    locked: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 

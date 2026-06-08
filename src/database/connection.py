@@ -47,3 +47,12 @@ def _apply_sqlite_compat_migrations() -> None:
         for column, statement in event_migrations.items():
             if column not in event_columns:
                 connection.exec_driver_sql(statement)
+
+        # `locked` marks human-authored, canonical data that must survive agent
+        # re-runs. Added after the initial schema, so back-fill on existing DBs.
+        fact_columns = {row[1] for row in connection.exec_driver_sql("PRAGMA table_info(facts)").fetchall()}
+        if "locked" not in fact_columns:
+            connection.exec_driver_sql("ALTER TABLE facts ADD COLUMN locked BOOLEAN DEFAULT 0 NOT NULL")
+        observation_columns = {row[1] for row in connection.exec_driver_sql("PRAGMA table_info(metric_observations)").fetchall()}
+        if "locked" not in observation_columns:
+            connection.exec_driver_sql("ALTER TABLE metric_observations ADD COLUMN locked BOOLEAN DEFAULT 0 NOT NULL")

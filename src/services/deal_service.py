@@ -3,7 +3,6 @@ from pathlib import Path
 from sqlalchemy.orm import Session
 
 from src.database.models import (
-    AgentRun,
     Company,
     ComputedMetric,
     Conflict,
@@ -16,6 +15,7 @@ from src.database.models import (
     ReviewItem,
     DealEvent,
 )
+from src.utils.ids import new_id
 
 
 class DealService:
@@ -117,17 +117,46 @@ class DealService:
         return created
 
     def clear_generated_intelligence(self, deal_id: str) -> None:
-        document_ids = [row[0] for row in self.db.query(Document.document_id).filter(Document.deal_id == deal_id).all()]
-        fact_ids = [row[0] for row in self.db.query(Fact.fact_id).filter(Fact.deal_id == deal_id).all()]
+        """Reset only the agent-regenerable intelligence for a deal.
 
-        self.db.query(AgentRun).filter(AgentRun.deal_id == deal_id).delete(synchronize_session=False)
+        A deal accumulates two kinds of data: things the agent derives from
+        sources (re-buildable on every run) and things a human committed to
+        (canonical, must persist). This used to delete *everything*, which
+        silently destroyed associate corrections and the audit trail on the
+        next run. We now preserve:
+
+        - locked facts and their sources/observations (human-authored values),
+        - resolved review items and resolved conflicts (decision history),
+        - the agent_runs audit trail.
+
+        and regenerate only the rest.
+        """
+        document_ids = [row[0] for row in self.db.query(Document.document_id).filter(Document.deal_id == deal_id).all()]
+        deletable_fact_ids = [
+            row[0]
+            for row in self.db.query(Fact.fact_id)
+            .filter(Fact.deal_id == deal_id, Fact.locked.is_(False))
+            .all()
+        ]
+
+        # Computed metrics are pure derivations -> always recomputed.
         self.db.query(ComputedMetric).filter(ComputedMetric.deal_id == deal_id).delete(synchronize_session=False)
-        self.db.query(Conflict).filter(Conflict.deal_id == deal_id).delete(synchronize_session=False)
-        self.db.query(ReviewItem).filter(ReviewItem.deal_id == deal_id).delete(synchronize_session=False)
-        self.db.query(MetricObservation).filter(MetricObservation.deal_id == deal_id).delete(synchronize_session=False)
-        if fact_ids:
-            self.db.query(FactSource).filter(FactSource.fact_id.in_(fact_ids)).delete(synchronize_session=False)
-        self.db.query(Fact).filter(Fact.deal_id == deal_id).delete(synchronize_session=False)
+        # Keep resolved history; only clear still-open items the agent regenerates.
+        self.db.query(Conflict).filter(
+            Conflict.deal_id == deal_id, Conflict.resolution_status == "open"
+        ).delete(synchronize_session=False)
+        self.db.query(ReviewItem).filter(
+            ReviewItem.deal_id == deal_id, ReviewItem.status == "open"
+        ).delete(synchronize_session=False)
+        self.db.query(MetricObservation).filter(
+            MetricObservation.deal_id == deal_id, MetricObservation.locked.is_(False)
+        ).delete(synchronize_session=False)
+        if deletable_fact_ids:
+            self.db.query(FactSource).filter(FactSource.fact_id.in_(deletable_fact_ids)).delete(synchronize_session=False)
+            self.db.query(Fact).filter(Fact.fact_id.in_(deletable_fact_ids)).delete(synchronize_session=False)
+        # Documents/chunks are processing artifacts rebuilt from the files on
+        # disk; locked facts never reference a chunk, so this leaves no dangling
+        # citations.
         if document_ids:
             self.db.query(DocumentChunk).filter(DocumentChunk.document_id.in_(document_ids)).delete(synchronize_session=False)
         self.db.query(Document).filter(Document.deal_id == deal_id).delete(synchronize_session=False)
