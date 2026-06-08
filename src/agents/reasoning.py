@@ -120,7 +120,7 @@ class LLMReasoningPlanner:
     def _call_gemini(self, prompt: str) -> str:
         url = (
             f"https://generativelanguage.googleapis.com/v1beta/models/"
-            f"{self.model}:generateContent?key={self.api_key}"
+            f"{self.model}:generateContent"
         )
         body = {
             "contents": [{"parts": [{"text": prompt}]}],
@@ -129,7 +129,7 @@ class LLMReasoningPlanner:
         request = urllib.request.Request(
             url,
             data=json.dumps(body).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
+            headers={"Content-Type": "application/json", "x-goog-api-key": self.api_key},
             method="POST",
         )
         try:
