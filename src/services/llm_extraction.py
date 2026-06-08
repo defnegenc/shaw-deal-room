@@ -28,6 +28,7 @@ SUPPORTED_LLM_FIELDS = {
 }
 
 WEB_RESEARCH_FIELDS = {
+    "website",
     "sector",
     "headquarters",
     "founders",
@@ -184,6 +185,7 @@ Return JSON only, with this exact shape:
 }}
 
 Extract only these fields, and only when clearly stated in the snippets:
+- website: the company's official homepage URL (the company's own domain, not a news/social link)
 - sector: industry or category (e.g. "FinTech / AI", "Climate Tech", "Enterprise SaaS")
 - headquarters: city and state/country
 - founders: full names, comma-separated

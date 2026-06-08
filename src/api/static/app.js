@@ -285,7 +285,9 @@ function renderResult(result) {
   els.computedMetrics.className = "stack";
   els.computedMetrics.innerHTML = result.computed_metrics.length
     ? result.computed_metrics.map(metricCard).join("")
-    : empty("No computed metrics yet.");
+    : empty(
+        "No computed metrics yet. These are ratios — ARR valuation multiple and annualized burn as a % of ARR — so they need both ARR and a valuation (or monthly burn) as numbers. Those typically come from a term sheet or financials; web research alone usually can't produce them. Upload diligence materials with those figures to compute them.",
+      );
 }
 
 function reviewCard(item) {

@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 import json
 
 from sqlalchemy import text
@@ -186,6 +186,10 @@ class DealResearchAgent:
         re-senses the deal, and decides again -- until it finishes or hits the
         step cap. Tool implementations are the same deterministic, cited tools
         the fixed planner uses; only the *control flow* is model-driven."""
+        # Rebuild agent-derived intelligence each run (locked/human facts are
+        # preserved). Without this the reasoning path piled new copies on top of
+        # the previous run's facts every time it was re-run.
+        self.deal_service.clear_generated_intelligence(deal.deal_id)
         run = AgentRun(
             run_id=new_id("run"),
             deal_id=deal.deal_id,
@@ -697,7 +701,7 @@ class DealResearchAgent:
             deal_id=deal.deal_id,
             company_name=deal.company.name,
             tools_used=tools_used,
-            accepted_facts=[_fact_dict(fact) for fact in facts if fact.review_status == "accepted"],
+            accepted_facts=_canonical_accepted(facts),
             low_confidence_facts=[_fact_dict(fact) for fact in facts if fact.confidence_score < 0.80],
             stale_metrics=[metric for metric in metric_status if metric["staleness_status"] == "stale"],
             conflicts=[
@@ -743,6 +747,31 @@ def _unreliable_source_reason(field_name: str, provider: str) -> str:
     return (
         f"{field_name} comes from '{provider}', which an associate previously "
         f"corrected on this deal. Verify against a stronger source before accepting."
+    )
+
+
+def _canonical_accepted(facts: list[Fact]) -> list[dict]:
+    """One canonical accepted value per field for the associate-facing list.
+
+    Multiple sources (a document, enrichment, the web) can each produce the same
+    field; showing every row reads as duplicates. Keep the strongest per field:
+    human-locked first, then highest confidence, then most recent."""
+    best: dict[str, Fact] = {}
+    for fact in facts:
+        if fact.review_status != "accepted":
+            continue
+        current = best.get(fact.field_name)
+        if current is None or _fact_rank(fact) > _fact_rank(current):
+            best[fact.field_name] = fact
+    return [_fact_dict(fact) for fact in sorted(best.values(), key=lambda f: f.field_name)]
+
+
+def _fact_rank(fact: Fact) -> tuple:
+    return (
+        1 if fact.locked else 0,
+        fact.confidence_score,
+        fact.as_of_date or date.min,
+        fact.created_at or datetime.min,
     )
 
 

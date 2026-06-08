@@ -229,5 +229,37 @@ class ReasoningLoopTests(unittest.TestCase):
         self.assertTrue(any(metric["metric_name"] == "arr_valuation_multiple" for metric in result.computed_metrics))
 
 
+class ReasoningRerunDedupTests(unittest.TestCase):
+    def setUp(self) -> None:
+        os.environ["GEMINI_API_KEY"] = ""
+        os.environ["SERPER_API_KEY"] = ""
+        build_db()
+
+    def test_rerun_does_not_accumulate_duplicate_facts(self) -> None:
+        # The reasoning path must rebuild agent-derived facts on each run, not
+        # pile new copies on top of the previous run's. Each run uses a fresh
+        # session, mirroring one request per run in production.
+        actions = ["process_documents", "enrich_company", "finish"]
+
+        def run() -> int:
+            with SessionLocal() as db:
+                result = DealResearchAgent(db, planner=FixedPlanner(list(actions))).update_deal_intelligence(deal_id="d_orbit")
+                return len(result.accepted_facts)
+
+        run()
+        first = run()
+        second = run()
+        self.assertEqual(first, second)
+
+    def test_accepted_facts_are_canonical_one_per_field(self) -> None:
+        # The associate-facing accepted list shows one canonical value per
+        # field, not every competing row from every source.
+        actions = ["process_documents", "enrich_company", "web_research", "finish"]
+        with SessionLocal() as db:
+            result = DealResearchAgent(db, planner=FixedPlanner(actions)).update_deal_intelligence(deal_id="d_orbit")
+        fields = [fact["field_name"] for fact in result.accepted_facts]
+        self.assertEqual(len(fields), len(set(fields)), f"duplicate fields in accepted_facts: {fields}")
+
+
 if __name__ == "__main__":
     unittest.main()
