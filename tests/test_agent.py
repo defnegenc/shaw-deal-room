@@ -261,6 +261,25 @@ class ReasoningRerunDedupTests(unittest.TestCase):
         self.assertEqual(len(fields), len(set(fields)), f"duplicate fields in accepted_facts: {fields}")
 
 
+class MetricPersistenceTests(unittest.TestCase):
+    def setUp(self) -> None:
+        os.environ["GEMINI_API_KEY"] = ""
+        os.environ["SERPER_API_KEY"] = ""
+        build_db()
+
+    def test_computed_metrics_are_written_to_the_database(self) -> None:
+        # The run returns computed metrics; they must also be persisted, not
+        # only built in memory for the response.
+        from src.database.models import ComputedMetric
+
+        with SessionLocal() as db:
+            result = DealResearchAgent(db).update_deal_intelligence(deal_id="d_orbit")
+        self.assertTrue(result.computed_metrics)
+        with SessionLocal() as db:
+            persisted = db.query(ComputedMetric).filter(ComputedMetric.deal_id == "d_orbit").count()
+        self.assertEqual(persisted, len(result.computed_metrics))
+
+
 class LoadIntelligenceTests(unittest.TestCase):
     def setUp(self) -> None:
         os.environ["GEMINI_API_KEY"] = ""

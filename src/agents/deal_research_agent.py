@@ -205,7 +205,11 @@ class DealResearchAgent:
         run.completed_at = datetime.utcnow()
         self.db.commit()
 
-        return self._build_result(run.run_id, deal, tools_used, plan, coverage, source_strategy_trace)
+        # _build_result computes derived metrics and detects conflicts; commit
+        # again so those rows are persisted, not just returned in the response.
+        result = self._build_result(run.run_id, deal, tools_used, plan, coverage, source_strategy_trace)
+        self.db.commit()
+        return result
 
     def _run_reasoning(self, deal: Deal, doc_paths: list[str] | None) -> AgentResult:
         """Agentic path: a planner chooses the next tool, observes the result,
@@ -283,7 +287,11 @@ class DealResearchAgent:
         run.completed_at = datetime.utcnow()
         self.db.commit()
 
-        return self._build_result(run.run_id, deal, tools_used, plan, coverage, source_strategy)
+        # _build_result computes derived metrics and detects conflicts; commit
+        # again so those rows are persisted, not just returned in the response.
+        result = self._build_result(run.run_id, deal, tools_used, plan, coverage, source_strategy)
+        self.db.commit()
+        return result
 
     def _reasoning_context(
         self, deal: Deal, state: dict, coverage: list[dict], reliability, observations: list[dict], exhausted: set[str] | None = None
