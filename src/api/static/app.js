@@ -9,11 +9,9 @@ const els = {
   toggleCreateButton: document.getElementById("toggleCreateButton"),
   createDealForm: document.getElementById("createDealForm"),
   createDealMessage: document.getElementById("createDealMessage"),
-  pipelineView: document.getElementById("pipelineView"),
   pipelineBoard: document.getElementById("pipelineBoard"),
   dealWorkspace: document.getElementById("dealWorkspace"),
   agentResults: document.getElementById("agentResults"),
-  backButton: document.getElementById("backButton"),
   companyName: document.getElementById("companyName"),
   dealStage: document.getElementById("dealStage"),
   dealStatus: document.getElementById("dealStatus"),
@@ -106,8 +104,10 @@ async function selectDeal(dealId) {
   resetAgentOutput();
   await loadSourceDocuments();
   await loadEvents();
-  els.pipelineView.classList.add("hidden");
+  // Single page: the pipeline stays visible; the selected company's workspace
+  // appears inline below it.
   els.dealWorkspace.classList.remove("hidden");
+  els.dealWorkspace.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 function renderSelectedDeal() {
@@ -125,7 +125,8 @@ function renderSelectedDeal() {
 }
 
 function clearWorkspace() {
-  els.pipelineView.classList.remove("hidden");
+  // The pipeline is always visible; clearing just hides the per-deal workspace
+  // (and with it all agent output) until a company is selected.
   els.dealWorkspace.classList.add("hidden");
 }
 
@@ -500,7 +501,6 @@ els.uploadButton.addEventListener("click", () => {
   els.documentFile.focus();
 });
 els.reviewItems.addEventListener("submit", resolveReview);
-els.backButton.addEventListener("click", navigateToPipeline);
 window.addEventListener("popstate", routeFromUrl);
 els.pipelineBoard.addEventListener("click", (event) => {
   const button = event.target.closest("[data-deal-id]");
