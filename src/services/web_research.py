@@ -2,11 +2,13 @@ from dataclasses import dataclass
 from datetime import date
 import json
 import os
+import re
 import urllib.error
 import urllib.request
 
 from src.config import load_env_file
 from src.parsers.document_parser import ExtractedFact
+from src.services.llm_extraction import LLMExtractionService
 
 
 @dataclass(frozen=True)
@@ -153,6 +155,7 @@ class WebResearchService:
     def __init__(self) -> None:
         load_env_file()
         self.serper_api_key = os.environ.get("SERPER_API_KEY")
+        self._llm = LLMExtractionService()
 
     def research_company(
         self,
@@ -174,15 +177,30 @@ class WebResearchService:
                 )
 
         mock_facts = MOCK_WEB_RESULTS.get(company_name, [])
+        # No Serper key and no mock data: return empty without a disambiguation
+        # question — the issue is missing config, not company ambiguity.
         return WebResearchResult(
             query=query,
             facts=mock_facts,
             used_live_search=False,
             source_count_by_field=_mock_source_counts(mock_facts),
-            clarification_questions=[] if mock_facts else [_disambiguation_question(company_name)],
+            clarification_questions=[],
         )
 
     def _search_serper(self, query: str, company_name: str, website: str | None) -> tuple[list[ExtractedFact], dict[str, int], list[dict]]:
+        snippets = self._serper_snippets(query)
+        # If site-restricted query returned nothing, retry without the site: filter
+        if not snippets and website and "site:" in query:
+            broad_query = _build_query(company_name, None, "", [])
+            snippets = self._serper_snippets(broad_query)
+        if not snippets:
+            return [], {}, [_disambiguation_question(company_name)]
+        facts = self._extract_facts(snippets, company_name)
+        source_counts = {fact.field_name: 1 for fact in facts}
+        questions = _clarification_questions(company_name, website, snippets, facts)
+        return facts, source_counts, questions
+
+    def _serper_snippets(self, query: str) -> list[dict]:
         body = {"q": query, "num": 8}
         request = urllib.request.Request(
             "https://google.serper.dev/search",
@@ -194,88 +212,48 @@ class WebResearchService:
             with urllib.request.urlopen(request, timeout=20) as response:
                 payload = json.loads(response.read().decode("utf-8"))
         except (urllib.error.URLError, TimeoutError, json.JSONDecodeError):
-            return [], {}, []
-
+            return []
         organic = payload.get("organic") or []
-        snippets = [
-            {
-                "title": result.get("title", ""),
-                "snippet": result.get("snippet", ""),
-                "link": result.get("link", ""),
-            }
-            for result in organic[:5]
-            if result.get("snippet")
+        return [
+            {"title": r.get("title", ""), "snippet": r.get("snippet", ""), "link": r.get("link", "")}
+            for r in organic[:5]
+            if r.get("snippet")
         ]
-        if not snippets:
-            return [], {}, [_disambiguation_question(company_name)]
 
-        facts, source_counts = _structured_facts_from_snippets(snippets)
-        questions = _clarification_questions(company_name, website, snippets, facts)
-        return facts, source_counts, questions
+    def _extract_facts(self, snippets: list[dict], company_name: str) -> list[ExtractedFact]:
+        # LLM extraction when Gemini is available
+        if self._llm.enabled:
+            try:
+                facts = self._llm.extract_web_snippet_facts(snippets, company_name)
+                if facts:
+                    return facts
+            except RuntimeError:
+                pass
+
+        # Regex fallback: only funding round (general-purpose pattern)
+        combined = "\n".join(f"{item['title']}: {item['snippet']}" for item in snippets)
+        facts: list[ExtractedFact] = []
+        round_fact = _latest_round_from_text(combined)
+        if round_fact:
+            facts.append(
+                _web_fact(
+                    "latest_round",
+                    round_fact["text"],
+                    round_fact["evidence"],
+                    _score_for_sources(round_fact["source_mentions"]),
+                    value_numeric=round_fact["amount"],
+                    currency="USD",
+                )
+            )
+        if not facts:
+            facts.append(_web_fact("external_company_research", combined[:1200], combined[:500], 0.55))
+        return facts
 
 
 def _build_query(company_name: str, website: str | None, reason: str, target_fields: list[str]) -> str:
     website_part = f" site:{website.replace('https://', '').replace('http://', '')}" if website else ""
     targets = " ".join(target_fields)
     return f"{company_name} {targets} investors funding founders headcount latest news {reason}{website_part}".strip()
-
-
-def _structured_facts_from_snippets(snippets: list[dict]) -> tuple[list[ExtractedFact], dict[str, int]]:
-    text = "\n".join(f"{item['title']}: {item['snippet']}" for item in snippets)
-    facts: list[ExtractedFact] = []
-    source_counts: dict[str, int] = {}
-
-    sector = _sector_from_text(text)
-    if sector:
-        count = _source_mentions(snippets, [sector, "finance", "fintech", "ai"])
-        source_counts["sector"] = count
-        facts.append(_web_fact("sector", sector, _evidence_for(text, sector), _score_for_sources(count)))
-
-    headquarters = _headquarters_from_text(text)
-    if headquarters:
-        count = _source_mentions(snippets, [headquarters.split(",")[0]])
-        source_counts["headquarters"] = count
-        facts.append(_web_fact("headquarters", headquarters, _evidence_for(text, headquarters), _score_for_sources(count)))
-
-    latest_round = _latest_round_from_text(text)
-    if latest_round:
-        source_counts["latest_round"] = latest_round["source_mentions"]
-        facts.append(
-            _web_fact(
-                "latest_round",
-                latest_round["text"],
-                latest_round["evidence"],
-                _score_for_sources(latest_round["source_mentions"]),
-                value_numeric=latest_round["amount"],
-                currency="USD",
-            )
-        )
-
-    investors = _investors_from_text(text)
-    if investors:
-        count = _source_mentions(snippets, investors)
-        source_counts["external_investors"] = count
-        facts.append(
-            _web_fact(
-                "external_investors",
-                ", ".join(investors),
-                _evidence_for_any(text, investors),
-                _score_for_sources(count),
-            )
-        )
-
-    founders = _founders_from_text(text)
-    if founders:
-        count = _source_mentions(snippets, founders.split(", "))
-        source_counts["founders"] = count
-        facts.append(_web_fact("founders", founders, _evidence_for(text, founders.split(",")[0]), _score_for_sources(count)))
-
-    if not facts:
-        combined = " ".join(item["snippet"] for item in snippets)
-        facts.append(_web_fact("external_company_research", combined[:1200], combined[:500], 0.55))
-        source_counts["external_company_research"] = len(snippets)
-
-    return facts, source_counts
 
 
 def _web_fact(
@@ -299,28 +277,7 @@ def _web_fact(
     )
 
 
-def _sector_from_text(text: str) -> str | None:
-    lower = text.lower()
-    if "financial" in lower or "finance" in lower or "bank" in lower or "fintech" in lower:
-        if "ai" in lower or "artificial intelligence" in lower:
-            return "FinTech / AI for financial services"
-        return "FinTech"
-    if "climate" in lower or "energy" in lower:
-        return "Climate / Energy"
-    return None
-
-
-def _headquarters_from_text(text: str) -> str | None:
-    candidates = ["New York", "San Francisco", "Austin", "London", "Boston"]
-    for candidate in candidates:
-        if candidate.lower() in text.lower():
-            return f"{candidate}, NY" if candidate == "New York" else candidate
-    return None
-
-
 def _latest_round_from_text(text: str) -> dict | None:
-    import re
-
     matches = re.findall(r"\$([\d.]+)\s*([MB])\s*(Series\s+[A-Z])", text, flags=re.IGNORECASE)
     if not matches:
         return None
@@ -335,46 +292,9 @@ def _latest_round_from_text(text: str) -> dict | None:
     }
 
 
-def _investors_from_text(text: str) -> list[str]:
-    known = [
-        "Sequoia",
-        "Thrive Capital",
-        "Khosla Ventures",
-        "J.P. Morgan",
-        "JP Morgan",
-        "Goldman Sachs",
-        "Northstar Ventures",
-    ]
-    found = []
-    for investor in known:
-        if investor.lower() in text.lower():
-            normalized = "J.P. Morgan" if investor == "JP Morgan" else investor
-            if normalized not in found:
-                found.append(normalized)
-    return found
-
-
-def _founders_from_text(text: str) -> str | None:
-    known_groups = [
-        ["Gabriel Stengel", "John Willett", "Tumas Rackaitis"],
-    ]
-    for group in known_groups:
-        if any(name.lower() in text.lower() for name in group):
-            return ", ".join(name for name in group if name.lower() in text.lower())
-    return None
-
-
 def _evidence_for(text: str, needle: str) -> str:
     lines = [line.strip() for line in text.splitlines() if needle.lower() in line.lower()]
     return lines[0][:500] if lines else text[:500]
-
-
-def _evidence_for_any(text: str, needles: list[str]) -> str:
-    for needle in needles:
-        evidence = _evidence_for(text, needle)
-        if evidence:
-            return evidence
-    return text[:500]
 
 
 def _score_for_sources(source_count: int) -> float:
@@ -383,15 +303,6 @@ def _score_for_sources(source_count: int) -> float:
     if source_count == 2:
         return 0.84
     return 0.72
-
-
-def _source_mentions(snippets: list[dict], needles: list[str]) -> int:
-    count = 0
-    for item in snippets:
-        haystack = f"{item.get('title', '')} {item.get('snippet', '')}".lower()
-        if any(needle.lower() in haystack for needle in needles if needle):
-            count += 1
-    return count
 
 
 def _mock_source_counts(facts: list[ExtractedFact]) -> dict[str, int]:

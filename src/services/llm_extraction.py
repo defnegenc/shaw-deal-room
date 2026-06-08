@@ -27,6 +27,17 @@ SUPPORTED_LLM_FIELDS = {
     "lead_investor",
 }
 
+WEB_RESEARCH_FIELDS = {
+    "sector",
+    "headquarters",
+    "founders",
+    "latest_round",
+    "external_investors",
+    "headcount",
+    "founding_year",
+    "market_position",
+}
+
 
 class LLMExtractionService:
     def __init__(self) -> None:
@@ -46,6 +57,26 @@ class LLMExtractionService:
         response_text = self._call_gemini_text(prompt)
         payload = _parse_json_response(response_text)
         return _facts_from_payload(payload, fallback_as_of_date=parse_as_of_date(text), method="gemini_flash_fallback", confidence_score=0.74)
+
+    def extract_web_snippet_facts(self, snippets: list[dict], company_name: str) -> list[ExtractedFact]:
+        """Extract facts from Serper search result snippets using LLM."""
+        if not self.enabled or not snippets:
+            return []
+        snippet_text = "\n".join(
+            f"[{i + 1}] {item.get('title', '')}: {item.get('snippet', '')} ({item.get('link', '')})"
+            for i, item in enumerate(snippets)
+        )
+        prompt = _build_web_snippet_prompt(snippet_text, company_name)
+        response_text = self._call_gemini_text(prompt)
+        payload = _parse_json_response(response_text)
+        return _facts_from_payload(
+            payload,
+            fallback_as_of_date=None,
+            method="serper_web_search",
+            confidence_score=0.0,
+            allowed_fields=WEB_RESEARCH_FIELDS,
+            confidence_from_payload=True,
+        )
 
     def extract_image_facts(self, path: str | Path, target_fields: set[str]) -> list[ExtractedFact]:
         if not self.enabled or not target_fields:
@@ -132,6 +163,47 @@ Document:
 """.strip()
 
 
+def _build_web_snippet_prompt(snippet_text: str, company_name: str) -> str:
+    return f"""
+You extract facts about "{company_name}" from web search snippets for a venture investment associate.
+
+Return JSON only, with this exact shape:
+{{
+  "facts": [
+    {{
+      "field_name": "headquarters",
+      "value_text": "New York, NY",
+      "value_numeric": null,
+      "unit": null,
+      "currency": null,
+      "as_of_date": null,
+      "quoted_evidence": "exact phrase from snippet that supports this",
+      "confidence": 0.85
+    }}
+  ]
+}}
+
+Extract only these fields, and only when clearly stated in the snippets:
+- sector: industry or category (e.g. "FinTech / AI", "Climate Tech", "Enterprise SaaS")
+- headquarters: city and state/country
+- founders: full names, comma-separated
+- latest_round: round name and amount (e.g. "$50M Series B")
+- external_investors: investor names, comma-separated
+- headcount: number of employees (value_numeric = count, unit = "employees")
+- founding_year: year founded (value_text = "2021")
+- market_position: one sentence describing the product and market
+
+For money fields: set value_numeric to the full dollar amount as a number, currency = "USD".
+For latest_round: value_numeric = the round amount.
+Set confidence between 0.6 (single ambiguous mention) and 0.92 (multiple sources, unambiguous).
+Do not guess or infer beyond what the snippets directly state.
+The quoted_evidence must be a short exact phrase from one of the snippets.
+
+Search snippets:
+{snippet_text}
+""".strip()
+
+
 def _build_image_prompt(target_fields: list[str], filename: str) -> str:
     fields = ", ".join(target_fields)
     return f"""
@@ -180,11 +252,15 @@ def _facts_from_payload(
     fallback_as_of_date: date | None,
     method: str,
     confidence_score: float,
+    allowed_fields: set[str] | None = None,
+    confidence_from_payload: bool = False,
 ) -> list[ExtractedFact]:
+    if allowed_fields is None:
+        allowed_fields = SUPPORTED_LLM_FIELDS
     facts: list[ExtractedFact] = []
     for item in payload.get("facts", []):
         field_name = item.get("field_name")
-        if field_name not in SUPPORTED_LLM_FIELDS:
+        if field_name not in allowed_fields:
             continue
         evidence = item.get("quoted_evidence")
         if not evidence:
@@ -197,6 +273,13 @@ def _facts_from_payload(
             except ValueError:
                 as_of_date = fallback_as_of_date
 
+        score = confidence_score
+        if confidence_from_payload and item.get("confidence") is not None:
+            try:
+                score = float(item["confidence"])
+            except (TypeError, ValueError):
+                score = confidence_score
+
         facts.append(
             ExtractedFact(
                 field_name=field_name,
@@ -206,7 +289,7 @@ def _facts_from_payload(
                 currency=item.get("currency"),
                 as_of_date=as_of_date,
                 evidence=evidence,
-                confidence_score=confidence_score,
+                confidence_score=score,
                 extraction_method=method,
             )
         )

@@ -352,10 +352,15 @@ class DealResearchAgent:
             deal.company.sector = enriched.sector
             deal.company.geography = enriched.geography
             deal.company.summary = enriched.summary
-            forced = SourceReliabilityService.should_force_review(
-                reliability, "mock_company_provider", "mock_company_provider"
-            )
+            provider = enriched.source
+            forced = SourceReliabilityService.should_force_review(reliability, provider, provider)
+            is_live = provider == "gemini_enrichment"
             for field_name, value in enriched.facts.items():
+                evidence = (
+                    f"Gemini enrichment: {field_name} = {value}"
+                    if is_live
+                    else f"Mock enrichment: {field_name} = {value}"
+                )
                 facts.append(
                     self.fact_service.create_fact_from_extraction(
                         company_id=deal.company_id,
@@ -367,18 +372,16 @@ class DealResearchAgent:
                             unit=None,
                             currency=None,
                             as_of_date=None,
-                            evidence=f"Mock enrichment: {field_name} = {value}",
+                            evidence=evidence,
                             confidence_score=0.82,
-                            extraction_method="mock_enrichment",
+                            extraction_method=provider,
                         ),
                         source_type="enrichment",
-                        source_label="mock_company_provider",
-                        provider="mock_company_provider",
+                        source_label=provider,
+                        provider=provider,
                         url=deal.company.website,
                         force_review=forced,
-                        review_reason_override=_unreliable_source_reason(field_name, "mock_company_provider")
-                        if forced
-                        else None,
+                        review_reason_override=_unreliable_source_reason(field_name, provider) if forced else None,
                     )
                 )
         trace.append({"tool": "enrich_company", "enriched": enriched is not None})
