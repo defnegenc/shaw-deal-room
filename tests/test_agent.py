@@ -8,7 +8,16 @@ from src.database.connection import SessionLocal
 
 class AgentSmokeTests(unittest.TestCase):
     def setUp(self) -> None:
-        os.environ.pop("GEMINI_API_KEY", None)
+        # Neutralize every external provider so tests are hermetic and
+        # reproducible. With a real SERPER_API_KEY present the agent would
+        # otherwise flip to live web search and return non-deterministic
+        # extractions (this is why test_rogo failed against a populated .env).
+        # We set empty strings rather than pop: the services call
+        # load_env_file() which uses os.environ.setdefault, so a popped key is
+        # immediately re-read from .env. An empty string is "present but
+        # falsy", which both setdefault and the truthy checks respect.
+        os.environ["GEMINI_API_KEY"] = ""
+        os.environ["SERPER_API_KEY"] = ""
         build_db()
 
     def test_orbitgrid_flags_conflict_and_low_confidence(self) -> None:
