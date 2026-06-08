@@ -53,7 +53,7 @@ Optional live web search:
 SERPER_API_KEY=your_key_here
 ```
 
-If `SERPER_API_KEY` is not set, the agent uses mocked web-search results for repeatable demos. The agent chooses web research only after it sees stale metrics, missing important fields, or conflicting sources.
+When `SERPER_API_KEY` is set, the agent runs a live Google search through Serper and then uses Gemini to extract structured facts (sector, headquarters, founders, latest round, investors, headcount) from the result snippets — there is no hardcoded list of cities, investors, or founders. If the search is site-restricted by the company website and returns nothing (e.g. a mistyped domain), it retries without the site filter. If `SERPER_API_KEY` is not set, the agent falls back to mocked web-search results for the three seeded demo companies only. The agent chooses web research only after it sees stale metrics, missing important fields, or conflicting sources.
 
 Start the API:
 
@@ -116,7 +116,7 @@ The deterministic tools, in the fallback order:
 1. Inspect deal state.
 2. Process uploaded or inferred local documents.
 3. Extract structured facts with regex-based parsers.
-4. Enrich company profile from a mocked provider.
+4. Enrich company profile — a mocked provider for the seeded demo companies, and a Gemini lookup as the fallback for any other company when `GEMINI_API_KEY` is set.
 5. Detect conflicts against existing facts.
 6. Compute derived metrics.
 7. Create review items for stale, conflicting, or low-confidence values.

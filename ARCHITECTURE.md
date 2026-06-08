@@ -297,11 +297,18 @@ This keeps the agent trustworthy: it shows what it tried, why it picked a source
 
 The MVP uses multiple parser lanes that all emit the same `ExtractedFact` contract:
 
-- deterministic regex for clean text documents
-- Gemini Flash text fallback for missed fields when `GEMINI_API_KEY` is configured
+- deterministic regex for clean `Label: value` text documents (the seed
+  documents use this format; it is fast, free, and verifiable)
+- Gemini Flash text fallback for fields the regex lane missed, when
+  `GEMINI_API_KEY` is configured
 - PDF text extraction via `pypdf`
 - spreadsheet text normalization via `openpyxl`
 - image/screenshot extraction via Gemini multimodal support when `GEMINI_API_KEY` is configured
+
+The regex lane is deliberately format-locked to the demo documents; for
+arbitrary real-world documents the Gemini lane is the path that generalizes.
+The two-lane order (deterministic first, LLM only for the gaps) keeps cheap,
+auditable extraction in front and pays for the model only where it adds value.
 
 Uploaded documents can be labeled fuzzily by the Associate, e.g. `email screenshot`, `handwritten note`, `Excel sheet`, or `CSV`. The label is normalized into `documents.doc_type`; future parser selection can use that value to route the document to OCR, vision extraction, spreadsheet normalization, or document-specific extraction.
 
@@ -369,12 +376,21 @@ Recommended source tiers:
 
 Near-term prototype improvement:
 
-- Keep live external integrations out of scope.
-- Add a provider abstraction such as `CompanyEnrichmentService`.
-- Add a web research tool such as `WebResearchService`; the current implementation supports mocked results by default and can call Serper if `SERPER_API_KEY` is set.
-- Return mocked Crunchbase/PitchBook-style fields: investors, latest round, funding total, employee range, founding year, headquarters.
-- Store every enriched field as a fact with `source_type`, `provider`, `source_citation`, and confidence.
-- Let the conflict detector compare provider facts against documents, but give documents of record more authority in the final summary.
+- `CompanyEnrichmentService` is the provider abstraction. It returns mocked
+  Crunchbase/PitchBook-style fields (sector, geography, summary, founding year,
+  market position) for the seeded demo companies, and falls back to a Gemini
+  lookup for any other company when `GEMINI_API_KEY` is set. The fact's
+  `provider`/`source_label` records which path was used (`mock_company_provider`
+  vs `gemini_enrichment`) so it is never misrepresented in the citation trail.
+- `WebResearchService` runs a live Serper search when `SERPER_API_KEY` is set
+  and uses Gemini to extract structured facts from the result snippets — no
+  hardcoded list of cities, investors, or founders. Without the key it returns
+  mocked results for the seeded companies only. A single general-purpose regex
+  (a `$X{M,B} Series Y` round pattern) remains as the no-LLM fallback.
+- Every enriched/researched field is stored as a fact with `source_type`,
+  `provider`, `source_citation`, and confidence.
+- The conflict detector compares provider facts against documents, but documents
+  of record keep more authority in the final summary.
 
 This lets the interview story be: "I would integrate PitchBook or Crunchbase behind this provider boundary, but the MVP demonstrates the more important logic: source weighting, provenance, conflict detection, and Associate review."
 
