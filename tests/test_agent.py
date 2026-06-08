@@ -5,7 +5,7 @@ from unittest.mock import patch
 from scripts.build_db import build_db
 from src.agents.deal_research_agent import DealResearchAgent
 from src.database.connection import SessionLocal
-from src.agents.reasoning import FixedPlanner
+from src.agents.reasoning import FixedPlanner, PlannerUnavailable
 from src.database.models import AgentRun, Fact
 from src.services.review_resolution import ReviewResolutionService
 
@@ -195,6 +195,20 @@ class ReasoningLoopTests(unittest.TestCase):
             result = agent.update_deal_intelligence(deal_id="d_orbit")
         self.assertEqual([step["action"] for step in result.plan], ["finish"])
         self.assertEqual(result.computed_metrics, [])
+
+    def test_falls_back_to_deterministic_when_planner_unavailable(self) -> None:
+        # If the LLM planner cannot be reached, the run must still produce a
+        # full, cited report via the deterministic plan -- not an empty one.
+        class _AlwaysUnavailablePlanner:
+            def decide(self, context):
+                raise PlannerUnavailable("simulated model outage")
+
+        with SessionLocal() as db:
+            agent = DealResearchAgent(db, planner=_AlwaysUnavailablePlanner())
+            result = agent.update_deal_intelligence(deal_id="d_orbit")
+
+        self.assertTrue(any(conflict["field_name"] == "pre_money_valuation" for conflict in result.conflicts))
+        self.assertTrue(any(metric["metric_name"] == "arr_valuation_multiple" for metric in result.computed_metrics))
 
 
 if __name__ == "__main__":

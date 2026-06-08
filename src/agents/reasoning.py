@@ -64,6 +64,11 @@ TOOL_CATALOG: dict[str, str] = {
 TOOL_NAMES = frozenset(TOOL_CATALOG)
 
 
+class PlannerUnavailable(RuntimeError):
+    """Raised when an LLM planner cannot be reached. The agent treats this as a
+    signal to fall back to the deterministic plan rather than stalling."""
+
+
 @dataclass(frozen=True)
 class Decision:
     action: str
@@ -102,11 +107,10 @@ class LLMReasoningPlanner:
         prompt = _build_planner_prompt(context)
         try:
             text = self._call_gemini(prompt)
-        except RuntimeError:
-            # If the model is unreachable mid-run, stop cleanly rather than
-            # looping; the deterministic fallback path remains available for
-            # whole runs without a key.
-            return Decision("finish", "Planner unavailable; stopping.")
+        except RuntimeError as exc:
+            # Surface unreachability so the agent can fall back to the
+            # deterministic plan instead of producing an empty report.
+            raise PlannerUnavailable(str(exc)) from exc
         payload = _parse_json(text)
         action = payload.get("action", "finish")
         if action not in TOOL_NAMES:

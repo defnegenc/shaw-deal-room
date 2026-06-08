@@ -15,7 +15,7 @@ from src.services.fact_service import FactService
 from src.services.metric_service import MetricService
 from src.services.source_reliability import SourceReliabilityService
 from src.services.web_research import WebResearchService
-from src.agents.reasoning import TOOL_CATALOG, LLMReasoningPlanner
+from src.agents.reasoning import TOOL_CATALOG, Decision, LLMReasoningPlanner, PlannerUnavailable
 from src.utils.ids import new_id
 
 
@@ -73,7 +73,14 @@ class DealResearchAgent:
         deal = self._resolve_deal(deal_id, company_name, website)
         try:
             if self.reasoning_planner is not None:
-                return self._run_reasoning(deal, doc_paths)
+                try:
+                    return self._run_reasoning(deal, doc_paths)
+                except PlannerUnavailable:
+                    # The LLM planner could not be reached before doing any
+                    # useful work. Discard the half-started run and fall back to
+                    # the deterministic plan so the run still yields a full,
+                    # cited report.
+                    self.db.rollback()
             return self._run(deal, doc_paths)
         except Exception as exc:
             # The whole run is one unit of work. On any failure, discard the
@@ -201,9 +208,18 @@ class DealResearchAgent:
         for _ in range(MAX_REASONING_STEPS):
             coverage = self._coverage_for_deal(deal)
             source_strategy = self._source_strategy(deal, coverage)
-            decision = self.reasoning_planner.decide(
-                self._reasoning_context(deal, state, coverage, reliability, observations)
-            )
+            try:
+                decision = self.reasoning_planner.decide(
+                    self._reasoning_context(deal, state, coverage, reliability, observations)
+                )
+            except PlannerUnavailable:
+                if not observations:
+                    # Never got going -- let the caller switch to the
+                    # deterministic plan.
+                    raise
+                # Lost the planner partway through; finish cleanly and keep the
+                # facts already gathered rather than discarding the run.
+                decision = Decision("finish", "Planner became unavailable; finishing with results so far.")
             plan.append({"action": decision.action, "reason": decision.rationale})
             trace.append({"tool": "reason", "action": decision.action, "rationale": decision.rationale})
             if decision.action == "finish" or decision.action not in TOOL_CATALOG:
