@@ -112,50 +112,10 @@ class DealResearchAgent:
         processed_facts: list[Fact] = []
 
         if any(step["action"] == "process_documents" for step in plan):
-            for path in paths:
-                tools_used.append("extract_document_facts")
-                result = self.document_service.process_document(deal, path)
-                processed_facts.extend(result["facts"])
-                trace.append({"tool": "extract_document_facts", "path": path, "facts": len(result["facts"])})
+            processed_facts.extend(self._tool_process_documents(deal, paths, trace, tools_used))
 
         if any(step["action"] == "enrich_company" for step in plan):
-            tools_used.append("enrich_company")
-            enriched = self.enrichment_service.enrich(deal.company.name)
-            if enriched:
-                deal.company.sector = enriched.sector
-                deal.company.geography = enriched.geography
-                deal.company.summary = enriched.summary
-                for field_name, value in enriched.facts.items():
-                    processed_facts.append(
-                        self.fact_service.create_fact_from_extraction(
-                            company_id=deal.company_id,
-                            deal_id=deal.deal_id,
-                            extracted=ExtractedFact(
-                                field_name=field_name,
-                                value_text=value,
-                                value_numeric=None,
-                                unit=None,
-                                currency=None,
-                                as_of_date=None,
-                                evidence=f"Mock enrichment: {field_name} = {value}",
-                                confidence_score=0.82,
-                                extraction_method="mock_enrichment",
-                            ),
-                            source_type="enrichment",
-                            source_label="mock_company_provider",
-                            provider="mock_company_provider",
-                            url=deal.company.website,
-                            force_review=SourceReliabilityService.should_force_review(
-                                reliability, "mock_company_provider", "mock_company_provider"
-                            ),
-                            review_reason_override=_unreliable_source_reason(field_name, "mock_company_provider")
-                            if SourceReliabilityService.should_force_review(
-                                reliability, "mock_company_provider", "mock_company_provider"
-                            )
-                            else None,
-                        )
-                    )
-            trace.append({"tool": "enrich_company", "enriched": enriched is not None})
+            processed_facts.extend(self._tool_enrich_company(deal, reliability, trace, tools_used))
 
         tools_used.append("detect_conflicts")
         conflicts = self.conflict_service.detect_conflicts(deal.deal_id, deal.company_id)
@@ -170,46 +130,9 @@ class DealResearchAgent:
         plan.extend(follow_up_plan)
 
         if any(step["action"] == "web_research" for step in follow_up_plan):
-            tools_used.append("web_research")
             reason = "; ".join(step["reason"] for step in follow_up_plan if step["action"] == "web_research")
-            target_fields = sorted(
-                {
-                    field
-                    for step in source_strategy
-                    if step["recommended_tool"] in {"company_site_search", "funding_news_search", "general_web_search"}
-                    for field in step["fields"]
-                }
-            )
-            result = self.web_research_service.research_company(deal.company.name, deal.company.website, reason, target_fields)
-            web_source_label = "live_web_search" if result.used_live_search else "mock_web_search"
-            web_provider = "serper" if result.used_live_search else "mock_web_search"
-            web_forced = SourceReliabilityService.should_force_review(reliability, web_provider, web_source_label)
-            for extracted in result.facts:
-                processed_facts.append(
-                    self.fact_service.create_fact_from_extraction(
-                        company_id=deal.company_id,
-                        deal_id=deal.deal_id,
-                        extracted=extracted,
-                        source_type="web_search",
-                        source_label=web_source_label,
-                        provider=web_provider,
-                        url=deal.company.website,
-                        force_review=web_forced,
-                        review_reason_override=_unreliable_source_reason(extracted.field_name, web_provider)
-                        if web_forced
-                        else None,
-                    )
-                )
-            trace.append(
-                {
-                    "tool": "web_research",
-                    "query": result.query,
-                    "facts": len(result.facts),
-                    "used_live_search": result.used_live_search,
-                    "source_count_by_field": result.source_count_by_field,
-                    "clarification_questions": result.clarification_questions,
-                }
-            )
+            target_fields = self._web_target_fields(source_strategy)
+            result = self._tool_web_research(deal, reliability, target_fields, reason, trace, tools_used, processed_facts)
             self._create_clarification_reviews(deal, result.clarification_questions)
             self._create_missing_required_reviews(deal, self._coverage_for_deal(deal))
 
@@ -231,6 +154,118 @@ class DealResearchAgent:
         self.db.commit()
 
         return self._build_result(run.run_id, deal, tools_used, plan, coverage, source_strategy_trace)
+
+    # --- Tools -----------------------------------------------------------
+    # Each tool performs one capability and records what it did into the
+    # shared trace. The deterministic planner calls them in a fixed order;
+    # the LLM reasoning loop calls the same tools in an order it chooses.
+
+    def _tool_process_documents(
+        self, deal: Deal, paths: list[str], trace: list[dict], tools_used: list[str]
+    ) -> list[Fact]:
+        facts: list[Fact] = []
+        for path in paths:
+            tools_used.append("extract_document_facts")
+            result = self.document_service.process_document(deal, path)
+            facts.extend(result["facts"])
+            trace.append({"tool": "extract_document_facts", "path": path, "facts": len(result["facts"])})
+        return facts
+
+    def _tool_enrich_company(
+        self, deal: Deal, reliability, trace: list[dict], tools_used: list[str]
+    ) -> list[Fact]:
+        tools_used.append("enrich_company")
+        facts: list[Fact] = []
+        enriched = self.enrichment_service.enrich(deal.company.name)
+        if enriched:
+            deal.company.sector = enriched.sector
+            deal.company.geography = enriched.geography
+            deal.company.summary = enriched.summary
+            forced = SourceReliabilityService.should_force_review(
+                reliability, "mock_company_provider", "mock_company_provider"
+            )
+            for field_name, value in enriched.facts.items():
+                facts.append(
+                    self.fact_service.create_fact_from_extraction(
+                        company_id=deal.company_id,
+                        deal_id=deal.deal_id,
+                        extracted=ExtractedFact(
+                            field_name=field_name,
+                            value_text=value,
+                            value_numeric=None,
+                            unit=None,
+                            currency=None,
+                            as_of_date=None,
+                            evidence=f"Mock enrichment: {field_name} = {value}",
+                            confidence_score=0.82,
+                            extraction_method="mock_enrichment",
+                        ),
+                        source_type="enrichment",
+                        source_label="mock_company_provider",
+                        provider="mock_company_provider",
+                        url=deal.company.website,
+                        force_review=forced,
+                        review_reason_override=_unreliable_source_reason(field_name, "mock_company_provider")
+                        if forced
+                        else None,
+                    )
+                )
+        trace.append({"tool": "enrich_company", "enriched": enriched is not None})
+        return facts
+
+    def _tool_web_research(
+        self,
+        deal: Deal,
+        reliability,
+        target_fields: list[str],
+        reason: str,
+        trace: list[dict],
+        tools_used: list[str],
+        processed_facts: list[Fact],
+    ):
+        tools_used.append("web_research")
+        result = self.web_research_service.research_company(deal.company.name, deal.company.website, reason, target_fields)
+        web_source_label = "live_web_search" if result.used_live_search else "mock_web_search"
+        web_provider = "serper" if result.used_live_search else "mock_web_search"
+        web_forced = SourceReliabilityService.should_force_review(reliability, web_provider, web_source_label)
+        for extracted in result.facts:
+            processed_facts.append(
+                self.fact_service.create_fact_from_extraction(
+                    company_id=deal.company_id,
+                    deal_id=deal.deal_id,
+                    extracted=extracted,
+                    source_type="web_search",
+                    source_label=web_source_label,
+                    provider=web_provider,
+                    url=deal.company.website,
+                    force_review=web_forced,
+                    review_reason_override=_unreliable_source_reason(extracted.field_name, web_provider)
+                    if web_forced
+                    else None,
+                )
+            )
+        trace.append(
+            {
+                "tool": "web_research",
+                "query": result.query,
+                "facts": len(result.facts),
+                "used_live_search": result.used_live_search,
+                "source_count_by_field": result.source_count_by_field,
+                "clarification_questions": result.clarification_questions,
+            }
+        )
+        return result
+
+    @staticmethod
+    def _web_target_fields(source_strategy: list[dict]) -> list[str]:
+        return sorted(
+            {
+                field
+                for step in source_strategy
+                if step["recommended_tool"] in {"company_site_search", "funding_news_search", "general_web_search"}
+                for field in step["fields"]
+            }
+        )
 
     def _record_failed_run(self, deal: Deal, exc: Exception) -> None:
         self.db.add(
