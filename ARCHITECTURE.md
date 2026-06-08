@@ -416,8 +416,8 @@ These are deliberately out of scope for the prototype but must not be silent:
   edit, and delete deals and run the agent. Production needs SSO and per-deal
   access control. This is the top production risk for an internal tool holding
   deal terms.
-- **API keys in URLs.** Gemini calls pass the key as a query parameter; move to
-  a header so keys do not land in logs/proxies.
+- **API keys are sent via header** (`x-goog-api-key`), not the URL query string,
+  so the Gemini key does not land in access logs, proxies, or exception text.
 - **Prompt injection.** Document text is interpolated into LLM prompts; a
   malicious document could attempt to steer extraction. Mitigated by a field
   allowlist and quoted-evidence requirement, but LLM evidence is not yet

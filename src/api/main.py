@@ -237,8 +237,11 @@ def update_deal_intelligence(payload: AgentRunRequest, db: Session = Depends(get
         )
         return asdict(result)
     except Exception as exc:
+        # Full traceback stays in the server log; the client gets a generic
+        # message so internal detail (paths, keys, SQL) never leaks in the API
+        # response.
         logger.exception("Agent run failed for deal_id=%s: %s", payload.deal_id, exc)
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise HTTPException(status_code=500, detail="Agent run failed") from exc
 
 
 @app.post("/review-items/{review_id}/resolve")

@@ -102,7 +102,7 @@ class LLMExtractionService:
         )
 
     def _call_gemini_parts(self, parts: list[dict]) -> str:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent?key={self.api_key}"
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent"
         body = {
             "contents": [{"parts": parts}],
             "generationConfig": {
@@ -113,7 +113,7 @@ class LLMExtractionService:
         request = urllib.request.Request(
             url,
             data=json.dumps(body).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
+            headers={"Content-Type": "application/json", "x-goog-api-key": self.api_key},
             method="POST",
         )
         try:

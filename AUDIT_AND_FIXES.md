@@ -130,8 +130,10 @@ These are deliberate prototype boundaries. Listed so they are explicit.
   registry would prevent drift. Deferred.
 - **No authentication/authorization** on the API. Acceptable for a prototype;
   production needs SSO + per-deal access control.
-- **Gemini key is sent as a URL query parameter** in the extraction/planner
-  calls; production should use a header so keys don't land in logs.
+- **Gemini key is sent via the `x-goog-api-key` header** (not the URL), and API
+  exceptions return a generic message to the client while the full traceback
+  stays in the server log — so keys/internal detail don't leak through URLs or
+  error responses.
 - **Document regex extraction is format-locked** to the seed documents'
   `Label: value` style and will not generalize to arbitrary PDFs; the Gemini
   lane is the real path for messy documents. (Money scaling handles `K`/`M`/`B`.)
@@ -201,7 +203,7 @@ the LLM lane filling only the gaps.
 4. **Stream real agent steps** over SSE so the UI shows the genuine tool
    sequence live rather than a staged indicator.
 5. **Auth + Postgres + per-deal access control** for a real multi-user internal
-   tool, and move the Gemini key from URL query param to a header.
+   tool (the remaining top production gap).
 6. **Promote repeated facts to typed tables** (`company_people`,
    `company_signals`) once the team proves they are queried often.
 7. **An adversarial verifier agent** that re-checks high-stakes numbers

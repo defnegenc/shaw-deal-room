@@ -68,7 +68,7 @@ Only include information you are confident about from public sources.
 Use null for any field you are uncertain about.
 Do not fabricate facts."""
 
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self._model}:generateContent?key={self._api_key}"
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self._model}:generateContent"
         body = {
             "contents": [{"parts": [{"text": prompt}]}],
             "generationConfig": {"temperature": 0, "responseMimeType": "application/json"},
@@ -76,7 +76,7 @@ Do not fabricate facts."""
         request = urllib.request.Request(
             url,
             data=json.dumps(body).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
+            headers={"Content-Type": "application/json", "x-goog-api-key": self._api_key},
             method="POST",
         )
         try:
