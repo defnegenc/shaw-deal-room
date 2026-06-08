@@ -19,7 +19,10 @@
           <p class="eyebrow">Associate Workbench</p>
           <h1>AI Deal Room</h1>
         </div>
-        <button id="toggleCreateButton" type="button" class="secondary-button">Add Company</button>
+        <div class="topbar-actions">
+          <button id="toggleCreateButton" type="button" class="secondary-button">Add Company</button>
+          <button id="runButton" type="button" disabled title="Select a company first">Run Agent</button>
+        </div>
       </section>
 
       <form id="createDealForm" class="create-form hidden">
@@ -45,6 +48,7 @@
         <button type="submit">Add Company</button>
       </form>
       <p id="createDealMessage" class="top-message"></p>
+      <p id="runMessage" class="run-message"></p>
 
       <section id="pipelineView" class="panel pipeline-panel">
         <div class="panel-head">
@@ -111,11 +115,6 @@
           </form>
           <p id="uploadMessage" class="form-message"></p>
         </section>
-
-        <section class="actions-row run-row">
-          <button id="runButton" class="primary-large run-agent-button">Run Agent</button>
-        </section>
-        <p id="runMessage" class="run-message"></p>
 
         <div id="postRunArea" class="results hidden">
         <section id="agentResults" class="results">

@@ -122,6 +122,11 @@ async function selectDeal(dealId) {
   await loadEvents();
   els.pipelineView.classList.add("hidden");
   els.dealWorkspace.classList.remove("hidden");
+  // A company is selected, so the top-bar Run Agent becomes clickable.
+  if (!state.agentRunning) {
+    els.runButton.disabled = false;
+    els.runButton.title = "Run the agent on this company";
+  }
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
@@ -145,6 +150,11 @@ function renderSelectedDeal() {
 function clearWorkspace() {
   els.dealWorkspace.classList.add("hidden");
   els.pipelineView.classList.remove("hidden");
+  // No company selected -> Run Agent is not clickable.
+  els.runButton.disabled = true;
+  els.runButton.title = "Select a company first";
+  els.runMessage.textContent = "";
+  els.runMessage.classList.remove("warn");
 }
 
 async function loadSourceDocuments() {
