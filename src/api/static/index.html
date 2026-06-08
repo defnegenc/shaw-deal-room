@@ -4,6 +4,12 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>AI Deal Room</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
   <body>
@@ -82,7 +88,6 @@
             </select>
             <input name="initial_contact" placeholder="Initial contact (optional)" />
             <button type="submit">Save Changes</button>
-            <button id="deleteDealButton" type="button" class="danger-button">Delete</button>
           </form>
           <p id="editDealMessage" class="form-message"></p>
         </section>
@@ -104,12 +109,13 @@
           <p id="uploadMessage" class="form-message"></p>
         </section>
 
-        <section class="actions-row">
-          <button id="runButton" class="primary-large">Run Agent</button>
-          <button id="uploadButton" class="secondary-large" type="button">Upload More Documents</button>
+        <section class="actions-row run-row">
+          <button id="runButton" class="primary-large run-agent-button">Run Agent</button>
         </section>
+        <p id="runMessage" class="run-message"></p>
 
-        <section id="agentResults" class="results hidden">
+        <div id="postRunArea" class="results hidden">
+        <section id="agentResults" class="results">
           <section class="panel">
             <div class="panel-head">
               <h2>Agent Actions</h2>
@@ -169,6 +175,11 @@
             <span id="eventCount" class="count">0</span>
           </div>
           <div id="eventLog" class="stack empty">No changes yet.</div>
+        </section>
+        </div>
+
+        <section class="panel danger-zone">
+          <button id="deleteDealButton" type="button" class="danger-button">Delete This Deal</button>
         </section>
       </section>
     </main>

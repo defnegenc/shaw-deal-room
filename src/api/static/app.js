@@ -3,14 +3,29 @@ const STAGES = ["Sourced", "Screening", "Due Diligence", "IC Review", "Term Shee
 const state = {
   deals: [],
   selectedDealId: null,
+  agentRunning: null,
+  runTimer: null,
 };
+
+const RUN_STAGES = [
+  ["Inspecting deal state", "Reading stage, documents on file, and which fields are still missing."],
+  ["Reading source documents", "Extracting cited facts from uploaded diligence materials."],
+  ["Enriching company profile", "Pulling sector, geography, and profile fields from the provider."],
+  ["Researching the web", "Searching public sources for founders, investors, and the latest round."],
+  ["Detecting conflicts", "Comparing new values against existing facts for contradictions."],
+  ["Computing metrics", "Deriving valuation multiples and burn ratios from accepted facts."],
+  ["Finalizing report", "Scoring confidence, flagging review items, and assembling citations."],
+];
 
 const els = {
   toggleCreateButton: document.getElementById("toggleCreateButton"),
   createDealForm: document.getElementById("createDealForm"),
   createDealMessage: document.getElementById("createDealMessage"),
+  pipelineView: document.getElementById("pipelineView"),
   pipelineBoard: document.getElementById("pipelineBoard"),
   dealWorkspace: document.getElementById("dealWorkspace"),
+  postRunArea: document.getElementById("postRunArea"),
+  runMessage: document.getElementById("runMessage"),
   agentResults: document.getElementById("agentResults"),
   companyName: document.getElementById("companyName"),
   dealStage: document.getElementById("dealStage"),
@@ -26,7 +41,6 @@ const els = {
   uploadMessage: document.getElementById("uploadMessage"),
   documentFile: document.getElementById("documentFile"),
   runButton: document.getElementById("runButton"),
-  uploadButton: document.getElementById("uploadButton"),
   agentActions: document.getElementById("agentActions"),
   citations: document.getElementById("citations"),
   factsTable: document.getElementById("factsTable"),
@@ -104,10 +118,9 @@ async function selectDeal(dealId) {
   resetAgentOutput();
   await loadSourceDocuments();
   await loadEvents();
-  // Single page: the pipeline stays visible; the selected company's workspace
-  // appears inline below it.
+  els.pipelineView.classList.add("hidden");
   els.dealWorkspace.classList.remove("hidden");
-  els.dealWorkspace.scrollIntoView({ behavior: "smooth", block: "start" });
+  window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
 function renderSelectedDeal() {
@@ -125,9 +138,8 @@ function renderSelectedDeal() {
 }
 
 function clearWorkspace() {
-  // The pipeline is always visible; clearing just hides the per-deal workspace
-  // (and with it all agent output) until a company is selected.
   els.dealWorkspace.classList.add("hidden");
+  els.pipelineView.classList.remove("hidden");
 }
 
 async function loadSourceDocuments() {
@@ -158,23 +170,79 @@ async function loadEvents() {
 async function runAgent() {
   const deal = currentDeal();
   if (!deal) return;
+
+  // Only one run at a time. If a run is already in flight (possibly for a
+  // different company), tell the user which one and bail.
+  if (state.agentRunning) {
+    els.runMessage.textContent = `The agent is currently running for ${state.agentRunning}. Please wait for it to finish.`;
+    els.runMessage.classList.add("warn");
+    return;
+  }
+
+  const startDealId = deal.deal_id;
+  state.agentRunning = deal.company_name;
+  els.runMessage.textContent = "";
+  els.runMessage.classList.remove("warn");
   els.runButton.disabled = true;
-  els.agentResults.classList.remove("hidden");
-  els.agentActions.className = "action-timeline";
-  els.agentActions.innerHTML = actionItem("Inspect deal", "Checking stage, documents, and missing fields.", "running");
+
+  els.postRunArea.classList.remove("hidden");
+  startLiveSteps();
 
   try {
     const result = await apiFetch("/agent-runs/update-deal-intelligence", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ deal_id: deal.deal_id }),
+      body: JSON.stringify({ deal_id: startDealId }),
     });
-    renderResult(result);
+    stopLiveSteps();
+    if (state.selectedDealId === startDealId) {
+      renderResult(result);
+      await loadEvents();
+    }
   } catch (error) {
-    els.agentActions.innerHTML = actionItem("Agent run failed", error.message, "danger");
+    stopLiveSteps();
+    if (state.selectedDealId === startDealId) {
+      els.agentActions.className = "action-timeline";
+      els.agentActions.innerHTML = actionItem("Agent run failed", error.message, "danger");
+    }
   } finally {
+    state.agentRunning = null;
     els.runButton.disabled = false;
   }
+}
+
+function startLiveSteps() {
+  els.agentActions.className = "action-timeline";
+  let current = 0;
+  const render = () => {
+    els.agentActions.innerHTML = RUN_STAGES.slice(0, current + 1)
+      .map(([title, body], idx) => liveStepItem(title, body, idx < current ? "done" : "running", idx === current))
+      .join("");
+  };
+  render();
+  state.runTimer = setInterval(() => {
+    if (current < RUN_STAGES.length - 1) {
+      current += 1;
+      render();
+    }
+  }, 750);
+}
+
+function stopLiveSteps() {
+  if (state.runTimer) {
+    clearInterval(state.runTimer);
+    state.runTimer = null;
+  }
+}
+
+function liveStepItem(title, body, tone, showSpinner) {
+  const spinner = showSpinner ? '<span class="spinner" aria-hidden="true"></span>' : "";
+  return `
+    <div class="action-item ${tone}">
+      <strong>${spinner}${escapeHtml(title)}</strong>
+      <span>${escapeHtml(body)}</span>
+    </div>
+  `;
 }
 
 function renderResult(result) {
@@ -299,7 +367,10 @@ function citationRow(citation) {
 }
 
 function resetAgentOutput() {
-  els.agentResults.classList.add("hidden");
+  stopLiveSteps();
+  els.postRunArea.classList.add("hidden");
+  els.runMessage.textContent = "";
+  els.runMessage.classList.remove("warn");
   els.planCount.textContent = "0";
   els.citationCount.textContent = "0";
   els.factCount.textContent = "0";
@@ -496,10 +567,6 @@ els.editDealForm.addEventListener("submit", updateDeal);
 els.deleteDealButton.addEventListener("click", deleteDeal);
 els.uploadForm.addEventListener("submit", uploadDocument);
 els.runButton.addEventListener("click", runAgent);
-els.uploadButton.addEventListener("click", () => {
-  els.uploadForm.scrollIntoView({ behavior: "smooth", block: "center" });
-  els.documentFile.focus();
-});
 els.reviewItems.addEventListener("submit", resolveReview);
 window.addEventListener("popstate", routeFromUrl);
 els.pipelineBoard.addEventListener("click", (event) => {

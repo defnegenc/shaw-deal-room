@@ -1,6 +1,9 @@
 from dataclasses import asdict
+import logging
 from pathlib import Path
 import re
+
+logger = logging.getLogger(__name__)
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
@@ -225,13 +228,17 @@ def download_source_document(deal_id: str, filename: str = Query(...), db: Sessi
 
 @app.post("/agent-runs/update-deal-intelligence")
 def update_deal_intelligence(payload: AgentRunRequest, db: Session = Depends(get_db)) -> dict:
-    result = DealResearchAgent(db).update_deal_intelligence(
-        deal_id=payload.deal_id,
-        company_name=payload.company_name,
-        website=payload.website,
-        doc_paths=payload.doc_paths,
-    )
-    return asdict(result)
+    try:
+        result = DealResearchAgent(db).update_deal_intelligence(
+            deal_id=payload.deal_id,
+            company_name=payload.company_name,
+            website=payload.website,
+            doc_paths=payload.doc_paths,
+        )
+        return asdict(result)
+    except Exception as exc:
+        logger.exception("Agent run failed for deal_id=%s: %s", payload.deal_id, exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @app.post("/review-items/{review_id}/resolve")
