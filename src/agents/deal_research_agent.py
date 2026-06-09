@@ -456,6 +456,13 @@ class DealResearchAgent:
                     else None,
                 )
             )
+        # Backfill the company website from research if the associate left it
+        # blank, so the deal header shows it and coverage closes.
+        if not deal.company.website:
+            for extracted in result.facts:
+                if extracted.field_name == "website" and extracted.value_text:
+                    deal.company.website = extracted.value_text
+                    break
         trace.append(
             {
                 "tool": "web_research",

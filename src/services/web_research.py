@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from datetime import date
+from urllib.parse import urlparse
 import json
 import os
 import re
@@ -166,7 +167,7 @@ class WebResearchService:
     ) -> WebResearchResult:
         query = _build_query(company_name, website, reason, target_fields or [])
         if self.serper_api_key:
-            facts, source_count_by_field, questions = self._search_serper(query, company_name, website)
+            facts, source_count_by_field, questions = self._search_serper(query, company_name, website, target_fields or [])
             if facts:
                 return WebResearchResult(
                     query=query,
@@ -187,7 +188,9 @@ class WebResearchService:
             clarification_questions=[],
         )
 
-    def _search_serper(self, query: str, company_name: str, website: str | None) -> tuple[list[ExtractedFact], dict[str, int], list[dict]]:
+    def _search_serper(
+        self, query: str, company_name: str, website: str | None, target_fields: list[str]
+    ) -> tuple[list[ExtractedFact], dict[str, int], list[dict]]:
         snippets = self._serper_snippets(query)
         # If site-restricted query returned nothing, retry without the site: filter
         if not snippets and website and "site:" in query:
@@ -196,6 +199,17 @@ class WebResearchService:
         if not snippets:
             return [], {}, [_disambiguation_question(company_name)]
         facts = self._extract_facts(snippets, company_name)
+        found = {fact.field_name for fact in facts}
+
+        # Refine the search for specific high-value fields still missing -- like a
+        # human Googling "<company> founders" directly instead of one broad query.
+        for focused_query in _targeted_queries(company_name, target_fields, found):
+            extra = self._serper_snippets(focused_query)
+            if extra:
+                facts.extend(self._extract_facts(extra, company_name))
+                found = {fact.field_name for fact in facts}
+
+        facts = _dedupe_web_facts(facts)
         source_counts = {fact.field_name: 1 for fact in facts}
         questions = _clarification_questions(company_name, website, snippets, facts)
         return facts, source_counts, questions
@@ -221,39 +235,98 @@ class WebResearchService:
         ]
 
     def _extract_facts(self, snippets: list[dict], company_name: str) -> list[ExtractedFact]:
-        # LLM extraction when Gemini is available
+        facts: list[ExtractedFact] = []
         if self._llm.enabled:
             try:
-                facts = self._llm.extract_web_snippet_facts(snippets, company_name)
-                if facts:
-                    return facts
+                facts = self._llm.extract_web_snippet_facts(snippets, company_name) or []
             except RuntimeError:
-                pass
+                facts = []
 
-        # Regex fallback: only funding round (general-purpose pattern)
-        combined = "\n".join(f"{item['title']}: {item['snippet']}" for item in snippets)
-        facts: list[ExtractedFact] = []
-        round_fact = _latest_round_from_text(combined)
-        if round_fact:
-            facts.append(
-                _web_fact(
-                    "latest_round",
-                    round_fact["text"],
-                    round_fact["evidence"],
-                    _score_for_sources(round_fact["source_mentions"]),
-                    value_numeric=round_fact["amount"],
-                    currency="USD",
-                )
-            )
         if not facts:
+            # Regex fallback: only funding round (general-purpose pattern)
+            combined = "\n".join(f"{item['title']}: {item['snippet']}" for item in snippets)
+            round_fact = _latest_round_from_text(combined)
+            if round_fact:
+                facts.append(
+                    _web_fact(
+                        "latest_round",
+                        round_fact["text"],
+                        round_fact["evidence"],
+                        _score_for_sources(round_fact["source_mentions"]),
+                        value_numeric=round_fact["amount"],
+                        currency="USD",
+                    )
+                )
+
+        # The homepage is in the result links, not stated in snippet text, so the
+        # LLM won't reliably emit it -- derive it deterministically instead.
+        if not any(fact.field_name == "website" for fact in facts):
+            website_fact = _website_from_snippets(snippets, company_name)
+            if website_fact:
+                facts.append(website_fact)
+
+        if not facts:
+            combined = "\n".join(f"{item['title']}: {item['snippet']}" for item in snippets)
             facts.append(_web_fact("external_company_research", combined[:1200], combined[:500], 0.55))
         return facts
 
 
+_NON_HOMEPAGE_DOMAINS = {
+    "linkedin.com", "twitter.com", "x.com", "facebook.com", "instagram.com",
+    "youtube.com", "crunchbase.com", "wikipedia.org", "github.com", "pitchbook.com",
+    "bloomberg.com", "techcrunch.com", "forbes.com", "medium.com", "reddit.com",
+    "glassdoor.com", "tracxn.com", "ycombinator.com", "cbinsights.com", "owler.com",
+}
+
+
+def _website_from_snippets(snippets: list[dict], company_name: str) -> ExtractedFact | None:
+    """Pick the company's own homepage from the result links.
+
+    The highest-ranked organic result whose domain matches the company name and
+    is not a directory/social/news site is almost always the official site."""
+    name_token = re.sub(r"[^a-z0-9]", "", company_name.lower())
+    if not name_token:
+        return None
+    for item in snippets:
+        link = item.get("link", "")
+        if not link.startswith("http"):
+            continue
+        host = urlparse(link).netloc.lower()
+        if host.startswith("www."):
+            host = host[4:]
+        if any(host == domain or host.endswith("." + domain) for domain in _NON_HOMEPAGE_DOMAINS):
+            continue
+        root = host.split(".")[0]
+        if root and (root in name_token or name_token in root or name_token.startswith(root) or root.startswith(name_token)):
+            return _web_fact("website", f"https://{host}", f"Official site identified from search result: {link}", 0.82)
+    return None
+
+
 def _build_query(company_name: str, website: str | None, reason: str, target_fields: list[str]) -> str:
+    # A focused profile query returns the company's own pages and reporting,
+    # rather than a keyword soup that surfaces unrelated results.
     website_part = f" site:{website.replace('https://', '').replace('http://', '')}" if website else ""
-    targets = " ".join(target_fields)
-    return f"{company_name} {targets} investors funding founders headcount latest news {reason}{website_part}".strip()
+    return f"{company_name} company funding investors founders headquarters{website_part}".strip()
+
+
+def _targeted_queries(company_name: str, target_fields: list[str], found: set[str]) -> list[str]:
+    """Per-field follow-up searches for high-value fields the broad query missed."""
+    wanted = set(target_fields or [])
+    queries: list[str] = []
+    if (not wanted or "founders" in wanted) and "founders" not in found:
+        queries.append(f"{company_name} founders co-founders CEO")
+    if (not wanted or "website" in wanted) and "website" not in found:
+        queries.append(f"{company_name} official website")
+    return queries
+
+
+def _dedupe_web_facts(facts: list[ExtractedFact]) -> list[ExtractedFact]:
+    best: dict[str, ExtractedFact] = {}
+    for fact in facts:
+        current = best.get(fact.field_name)
+        if current is None or fact.confidence_score > current.confidence_score:
+            best[fact.field_name] = fact
+    return list(best.values())
 
 
 def _web_fact(
