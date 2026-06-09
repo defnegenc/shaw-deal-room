@@ -334,6 +334,38 @@ Facts below `0.80` are highlighted for review. Any active conflict requires revi
 
 Computed metrics inherit the weakest quality status of their inputs. For example, a valuation multiple can be mathematically correct and have high extraction confidence, but still be `review_required` if it was computed from stale ARR or stale valuation inputs. This separates extraction confidence from decision readiness.
 
+### What the confidence score actually is (and isn't)
+
+The confidence score is a **heuristic trust signal based on how a fact was
+obtained**, not a calibrated probability of correctness. It is assigned by
+extraction method:
+
+| How the fact was obtained | Score | Rationale |
+|---|---:|---|
+| Associate correction (locked) | 1.00 | Human-authored, canonical. |
+| Deterministic regex on a `Label: $value` money field | 0.95 | Exact match on a structured field. |
+| Regex on a labelled number/text field | 0.90–0.92 | Structured, slightly less specific. |
+| Regex on an unlabelled number (e.g. "42 employees" mid-sentence) | 0.78 | Looser match. |
+| Company enrichment (provider or Gemini) | 0.82 | Self-reported profile data. |
+| Web fact, by corroborating-source count (regex fallback) | 0.72 / 0.84 / 0.90 | More independent sources → higher. |
+| Web fact extracted by Gemini from snippets | 0.60–0.92 | The model's own per-fact estimate. |
+| Gemini document/vision fallback | 0.72–0.74 | LLM extraction is less verifiable than regex. |
+
+The `0.80` auto-accept threshold then encodes a deliberate policy: a clean
+deterministic extraction clears it; an LLM guess or a single weak web source
+does not and is routed to human review.
+
+**This is intentionally a trust *tier*, not a measured probability** — it is not
+calibrated against labelled ground truth, so "0.74" does not mean "74% likely
+correct." It is honest as a triage signal (regex on a term sheet is genuinely
+more trustworthy than one LLM mention), and it is always shown alongside the
+field's source and quoted evidence so the Associate can judge for themselves.
+
+The production path to make it a real probability is a labelled evaluation set
+(expected facts per document type), then calibrating each method's score against
+measured accuracy — see the evaluation-set note under Document Parsing Strategy.
+This is deliberately out of scope for the prototype.
+
 ```mermaid
 graph TD
     Doc[Uploaded Document or Enrichment Source] --> Extract[Extract Fact or Metric]
