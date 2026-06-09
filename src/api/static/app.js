@@ -26,6 +26,7 @@ const els = {
   dealWorkspace: document.getElementById("dealWorkspace"),
   postRunArea: document.getElementById("postRunArea"),
   runMessage: document.getElementById("runMessage"),
+  runSummary: document.getElementById("runSummary"),
   agentResults: document.getElementById("agentResults"),
   companyName: document.getElementById("companyName"),
   dealStage: document.getElementById("dealStage"),
@@ -301,6 +302,7 @@ async function loadIntelligence() {
 }
 
 function renderResult(result) {
+  els.runSummary.textContent = result.summary || "The agent did not record a summary for this run.";
   els.planCount.textContent = result.plan.length;
   els.citationCount.textContent = result.citations.length;
   els.factCount.textContent = result.accepted_facts.length;
@@ -353,21 +355,46 @@ function renderResult(result) {
 }
 
 function reviewCard(item) {
+  const candidate = item.candidate;
+  const valueBlock = candidate
+    ? `<div class="review-value">
+         <span class="review-value-label">Best value found</span>
+         <strong>${escapeHtml(formatCandidate(candidate))}</strong>
+         <span class="review-source">${candidate.source_label ? `via ${escapeHtml(labelAction(candidate.source_label))}` : ""}${
+           candidate.as_of_date ? ` · as of ${escapeHtml(candidate.as_of_date)}` : ""
+         }${candidate.confidence_score != null ? ` · confidence ${escapeHtml(String(candidate.confidence_score))}` : ""}</span>
+       </div>`
+    : `<div class="review-value empty-value">No value found — supply one below.</div>`;
+  const actions = item.review_id
+    ? `<div class="review-actions">
+         ${candidate ? `<button type="button" class="accept-btn" data-action="accept">Accept</button>` : ""}
+         ${candidate ? `<button type="button" class="secondary-button" data-action="reject">Reject</button>` : ""}
+         <button type="button" class="secondary-button" data-action="custom">${candidate ? "Custom" : "Enter value"}</button>
+       </div>
+       <form class="resolve-form hidden">
+         <input name="raw_value" placeholder="Type a value, e.g. $12.4M" required />
+         <input name="as_of_text" placeholder="Optional date, e.g. Q1 2026" />
+         <button type="submit">Save</button>
+       </form>`
+    : "";
   return `
     <div class="item warn review-card" data-review-id="${escapeHtml(item.review_id || "")}">
-      <div class="item-title"><span>${escapeHtml(item.field_name)}</span><span>${escapeHtml(item.priority)}</span></div>
-      <p>${escapeHtml(item.reason ?? "")}</p>
-      ${
-        item.review_id
-          ? `<form class="resolve-form">
-              <input name="raw_value" placeholder="Type correction, e.g. $12.4M as of Q1 2026" required />
-              <input name="as_of_text" placeholder="Optional date, e.g. Q1 2026" />
-              <button type="submit">Save Resolution</button>
-            </form>`
-          : ""
-      }
+      <div class="item-title"><span>${escapeHtml(labelAction(item.field_name))}</span><span>${escapeHtml(item.priority)}</span></div>
+      <p class="review-reason">Flagged because: ${escapeHtml(item.reason ?? "")}</p>
+      ${valueBlock}
+      ${actions}
     </div>
   `;
+}
+
+function formatCandidate(candidate) {
+  if (candidate.currency === "USD" && typeof candidate.value === "number") {
+    return `$${Math.round(candidate.value).toLocaleString()}`;
+  }
+  if (candidate.unit && !String(candidate.value).includes(candidate.unit)) {
+    return `${candidate.value} ${candidate.unit}`;
+  }
+  return String(candidate.value);
 }
 
 function metricCard(metric) {
@@ -550,17 +577,47 @@ async function resolveReview(event) {
   };
   if (!payload.raw_value) return;
   try {
-    const resolved = await apiFetch(`/review-items/${reviewId}/resolve`, {
+    await apiFetch(`/review-items/${reviewId}/resolve`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
-    card.classList.remove("warn");
-    card.innerHTML = `<div class="item-title"><span>${escapeHtml(resolved.fact.field_name)}</span><span>Resolved</span></div><p>${escapeHtml(resolved.resolution_outcome)}</p>`;
-    await loadEvents();
+    await refreshAfterReview();
   } catch (error) {
-    card.querySelector("p").textContent = error.message;
+    const reason = card.querySelector(".review-reason");
+    if (reason) reason.textContent = error.message;
   }
+}
+
+// Accept (lock the agent's value), Reject (dismiss it), or Custom (reveal the
+// free-text form) — so the associate answers yes / no / custom in one click.
+async function handleReviewAction(event) {
+  const button = event.target.closest("[data-action]");
+  if (!button) return;
+  const card = button.closest("[data-review-id]");
+  const reviewId = card?.dataset.reviewId;
+  if (!reviewId) return;
+  const action = button.dataset.action;
+  if (action === "custom") {
+    const form = card.querySelector(".resolve-form");
+    form?.classList.toggle("hidden");
+    if (form && !form.classList.contains("hidden")) form.elements.raw_value.focus();
+    return;
+  }
+  try {
+    await apiFetch(`/review-items/${reviewId}/${action}`, { method: "POST" });
+    await refreshAfterReview();
+  } catch (error) {
+    const reason = card.querySelector(".review-reason");
+    if (reason) reason.textContent = error.message;
+  }
+}
+
+async function refreshAfterReview() {
+  // Re-render from the DB: the resolved item drops out of the review queue and
+  // an accepted value appears in the facts table.
+  await loadIntelligence();
+  await loadEvents();
 }
 
 function eventCard(event) {
@@ -636,6 +693,7 @@ els.deleteDealButton.addEventListener("click", deleteDeal);
 els.uploadForm.addEventListener("submit", uploadDocument);
 els.runButton.addEventListener("click", runAgent);
 els.reviewItems.addEventListener("submit", resolveReview);
+els.reviewItems.addEventListener("click", handleReviewAction);
 window.addEventListener("popstate", routeFromUrl);
 els.pipelineBoard.addEventListener("click", (event) => {
   const button = event.target.closest("[data-deal-id]");

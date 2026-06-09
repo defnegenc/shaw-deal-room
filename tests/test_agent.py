@@ -310,6 +310,69 @@ class MetricPersistenceTests(unittest.TestCase):
         self.assertEqual(persisted, len(result.computed_metrics))
 
 
+class RunSummaryTests(unittest.TestCase):
+    def setUp(self) -> None:
+        os.environ["GEMINI_API_KEY"] = ""
+        os.environ["SERPER_API_KEY"] = ""
+        build_db()
+
+    def test_summary_explains_document_based_run(self) -> None:
+        with SessionLocal() as db:
+            result = DealResearchAgent(db).update_deal_intelligence(deal_id="d_orbit")
+        self.assertTrue(result.summary)
+        self.assertIn("document", result.summary.lower())
+        self.assertIn("review", result.summary.lower())
+
+    def test_summary_explains_no_document_run(self) -> None:
+        with SessionLocal() as db:
+            result = DealResearchAgent(db).update_deal_intelligence(deal_id="d_rogo")
+        self.assertIn("no diligence documents", result.summary.lower())
+
+
+class ReviewAcceptRejectTests(unittest.TestCase):
+    def setUp(self) -> None:
+        os.environ["GEMINI_API_KEY"] = ""
+        os.environ["SERPER_API_KEY"] = ""
+        build_db()
+
+    def _first_review_with_candidate(self, result):
+        return next(item for item in result.review_items if item["candidate"])
+
+    def test_review_items_carry_the_best_value_found(self) -> None:
+        with SessionLocal() as db:
+            result = DealResearchAgent(db).update_deal_intelligence(deal_id="d_orbit")
+        with_candidate = [item for item in result.review_items if item["candidate"]]
+        self.assertTrue(with_candidate, "expected at least one review item with a candidate value")
+        self.assertIsNotNone(with_candidate[0]["candidate"]["value"])
+
+    def test_accept_locks_candidate_as_canonical(self) -> None:
+        from src.database.models import Fact
+        from src.services.review_resolution import ReviewResolutionService
+
+        with SessionLocal() as db:
+            result = DealResearchAgent(db).update_deal_intelligence(deal_id="d_orbit")
+            review = self._first_review_with_candidate(result)
+            fact_id = review["candidate"]["fact_id"]
+            ReviewResolutionService(db).accept_candidate(review["review_id"])
+            fact = db.query(Fact).filter(Fact.fact_id == fact_id).first()
+            self.assertTrue(fact.locked)
+            self.assertEqual(fact.review_status, "accepted")
+
+    def test_reject_demotes_candidate(self) -> None:
+        from src.database.models import Fact, ReviewItem
+        from src.services.review_resolution import ReviewResolutionService
+
+        with SessionLocal() as db:
+            result = DealResearchAgent(db).update_deal_intelligence(deal_id="d_orbit")
+            review = self._first_review_with_candidate(result)
+            fact_id = review["candidate"]["fact_id"]
+            ReviewResolutionService(db).reject_candidate(review["review_id"])
+            fact = db.query(Fact).filter(Fact.fact_id == fact_id).first()
+            resolved = db.query(ReviewItem).filter(ReviewItem.review_id == review["review_id"]).first()
+            self.assertEqual(fact.review_status, "rejected")
+            self.assertEqual(resolved.status, "resolved")
+
+
 class LoadIntelligenceTests(unittest.TestCase):
     def setUp(self) -> None:
         os.environ["GEMINI_API_KEY"] = ""

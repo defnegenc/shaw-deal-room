@@ -82,6 +82,96 @@ class ReviewResolutionService:
         }
 
 
+    def accept_candidate(self, review_id: str) -> dict:
+        """Accept the value the agent already found: lock it as canonical."""
+        review = self.db.query(ReviewItem).filter(ReviewItem.review_id == review_id).first()
+        if not review:
+            raise ValueError("Review item not found")
+        fact = self._candidate_fact(review)
+        if fact is None:
+            raise ValueError("No candidate value to accept; supply one instead")
+        fact.locked = True
+        fact.review_status = "accepted"
+        review.status = "resolved"
+        review.resolution_outcome = "agent_suggestion_accepted"
+        review.resolved_fact_id = fact.fact_id
+        review.resolved_at = datetime.utcnow()
+        source = self.db.query(FactSource).filter(FactSource.fact_id == fact.fact_id).first()
+        new_value = fact.value_numeric if fact.value_numeric is not None else fact.value_text
+        log_deal_event(
+            self.db,
+            review.deal_id,
+            review.field_name,
+            None,
+            new_value,
+            reason="Review resolved as agent_suggestion_accepted.",
+            event_type="review_resolution",
+            fact_id=fact.fact_id,
+            source_id=source.source_id if source else None,
+            source_label=source.source_label if source else None,
+            provider=source.provider if source else None,
+        )
+        self.metric_service.compute_for_deal(review.deal_id, fact.company_id)
+        self.db.commit()
+        return {
+            "review_id": review.review_id,
+            "status": review.status,
+            "resolution_outcome": review.resolution_outcome,
+            "fact": _fact_payload(fact),
+        }
+
+    def reject_candidate(self, review_id: str) -> dict:
+        """Reject the agent's value: dismiss the review and demote the fact."""
+        review = self.db.query(ReviewItem).filter(ReviewItem.review_id == review_id).first()
+        if not review:
+            raise ValueError("Review item not found")
+        fact = self._candidate_fact(review)
+        old_value = None
+        if fact is not None:
+            old_value = fact.value_numeric if fact.value_numeric is not None else fact.value_text
+            fact.review_status = "rejected"
+        review.status = "resolved"
+        review.resolution_outcome = "agent_suggestion_rejected"
+        review.resolved_at = datetime.utcnow()
+        log_deal_event(
+            self.db,
+            review.deal_id,
+            review.field_name,
+            old_value,
+            "rejected",
+            reason="Review resolved as agent_suggestion_rejected.",
+            event_type="review_resolution",
+        )
+        self.db.commit()
+        return {
+            "review_id": review.review_id,
+            "status": review.status,
+            "resolution_outcome": review.resolution_outcome,
+        }
+
+    def _candidate_fact(self, review: ReviewItem) -> Fact | None:
+        for fact_id in (review.candidate_fact_ids or "").split(","):
+            fact_id = fact_id.strip()
+            if not fact_id:
+                continue
+            fact = self.db.query(Fact).filter(Fact.fact_id == fact_id).first()
+            if fact is not None:
+                return fact
+        return None
+
+
+def _fact_payload(fact: Fact) -> dict:
+    return {
+        "fact_id": fact.fact_id,
+        "field_name": fact.field_name,
+        "value_text": fact.value_text,
+        "value_numeric": fact.value_numeric,
+        "currency": fact.currency,
+        "unit": fact.unit,
+        "as_of_date": fact.as_of_date.isoformat() if fact.as_of_date else None,
+    }
+
+
 def parse_associate_input(field_name: str, raw_value: str, as_of_text: str | None = None) -> dict:
     raw = raw_value.strip()
     combined = f"{raw} {as_of_text or ''}".strip()

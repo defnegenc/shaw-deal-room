@@ -273,6 +273,22 @@ def resolve_review_item(review_id: str, payload: ResolveReviewRequest, db: Sessi
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
+@app.post("/review-items/{review_id}/accept")
+def accept_review_item(review_id: str, db: Session = Depends(get_db)) -> dict:
+    try:
+        return ReviewResolutionService(db).accept_candidate(review_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.post("/review-items/{review_id}/reject")
+def reject_review_item(review_id: str, db: Session = Depends(get_db)) -> dict:
+    try:
+        return ReviewResolutionService(db).reject_candidate(review_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
 def _safe_source_document_path(deal_id: str, filename: str, db: Session) -> Path:
     deal = db.query(Deal).filter(Deal.deal_id == deal_id).first()
     if not deal:

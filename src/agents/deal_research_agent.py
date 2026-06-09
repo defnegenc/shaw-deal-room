@@ -5,7 +5,7 @@ import json
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from src.database.models import AgentRun, Deal, Fact, ReviewItem
+from src.database.models import AgentRun, Deal, Fact, FactSource, ReviewItem
 from src.parsers.document_parser import ExtractedFact
 from src.services.company_enrichment import CompanyEnrichmentService
 from src.services.conflict_service import ConflictService
@@ -35,6 +35,7 @@ class AgentResult:
     plan: list[dict]
     coverage_gaps: list[dict]
     source_strategy: list[dict]
+    summary: str = ""
 
 
 MAX_REASONING_STEPS = 8
@@ -732,28 +733,33 @@ class DealResearchAgent:
         source_strategy: list[dict],
     ) -> AgentResult:
         facts = self.db.query(Fact).filter(Fact.deal_id == deal.deal_id).all()
+        facts_by_id = {fact.fact_id: fact for fact in facts}
         reviews = self.db.query(ReviewItem).filter(ReviewItem.deal_id == deal.deal_id, ReviewItem.status == "open").all()
         conflicts = self.conflict_service.detect_conflicts(deal.deal_id, deal.company_id)
         computed = self.metric_service.compute_for_deal(deal.deal_id, deal.company_id)
         metric_status = self.deal_service.current_metric_status(deal.deal_id, deal.company_id)
+
+        accepted = _canonical_accepted(facts)
+        conflict_dicts = [
+            {
+                "field_name": conflict.field_name,
+                "severity": conflict.severity,
+                "fact_ids": conflict.fact_ids.split(","),
+                "status": conflict.resolution_status,
+            }
+            for conflict in conflicts
+        ]
+        review_dicts = [self._review_item_dict(item, facts_by_id) for item in reviews]
 
         return AgentResult(
             run_id=run_id,
             deal_id=deal.deal_id,
             company_name=deal.company.name,
             tools_used=tools_used,
-            accepted_facts=_canonical_accepted(facts),
+            accepted_facts=accepted,
             low_confidence_facts=[_fact_dict(fact) for fact in facts if fact.confidence_score < 0.80],
             stale_metrics=[metric for metric in metric_status if metric["staleness_status"] == "stale"],
-            conflicts=[
-                {
-                    "field_name": conflict.field_name,
-                    "severity": conflict.severity,
-                    "fact_ids": conflict.fact_ids.split(","),
-                    "status": conflict.resolution_status,
-                }
-                for conflict in conflicts
-            ],
+            conflicts=conflict_dicts,
             computed_metrics=[
                 {
                     "metric_name": metric.metric_name,
@@ -766,22 +772,75 @@ class DealResearchAgent:
                 }
                 for metric in computed
             ],
-            review_items=[
-                {
-                    "review_id": item.review_id,
-                    "field_name": item.field_name,
-                    "reason": item.reason,
-                    "priority": item.priority,
-                    "status": item.status,
-                    "candidate_fact_ids": item.candidate_fact_ids,
-                }
-                for item in reviews
-            ],
+            review_items=review_dicts,
             citations=_citations(self.db, deal.deal_id),
             plan=plan,
             coverage_gaps=coverage,
             source_strategy=source_strategy,
+            summary=_run_summary(tools_used, accepted, len(review_dicts), conflict_dicts, len(computed)),
         )
+
+    def _review_item_dict(self, item: ReviewItem, facts_by_id: dict[str, Fact]) -> dict:
+        # Attach the best value the agent already found for this field so the
+        # associate sees it (and can accept it) instead of an empty box.
+        candidate = None
+        for fact_id in (item.candidate_fact_ids or "").split(","):
+            fact = facts_by_id.get(fact_id.strip())
+            if fact is None:
+                continue
+            source = self.db.query(FactSource).filter(FactSource.fact_id == fact.fact_id).first()
+            candidate = {
+                "fact_id": fact.fact_id,
+                "value": fact.value_numeric if fact.value_numeric is not None else fact.value_text,
+                "currency": fact.currency,
+                "unit": fact.unit,
+                "as_of_date": fact.as_of_date.isoformat() if fact.as_of_date else None,
+                "confidence_score": round(fact.confidence_score, 2),
+                "source_label": source.source_label if source else None,
+            }
+            break
+        return {
+            "review_id": item.review_id,
+            "field_name": item.field_name,
+            "reason": item.reason,
+            "priority": item.priority,
+            "status": item.status,
+            "candidate_fact_ids": item.candidate_fact_ids,
+            "candidate": candidate,
+        }
+
+
+def _plural(count: int) -> str:
+    return "" if count == 1 else "s"
+
+
+def _run_summary(tools_used: list[str], accepted: list[dict], review_count: int, conflicts: list[dict], computed_count: int) -> str:
+    """A short, plain-English account of the approach the run actually took."""
+    parts: list[str] = []
+    docs = tools_used.count("extract_document_facts")
+    if docs:
+        parts.append(
+            f"Processed {docs} uploaded document{_plural(docs)} first as the most trustworthy source for financials and deal terms."
+        )
+    else:
+        parts.append(
+            "No diligence documents were uploaded, so I started from company enrichment and public web research."
+        )
+    if "web_research" in tools_used:
+        parts.append(
+            "I ran web research with targeted follow-up searches for high-value fields still missing, such as founders and the company website."
+        )
+    outcome = f"Accepted {len(accepted)} fact{_plural(len(accepted))}"
+    if computed_count:
+        outcome += f", computed {computed_count} metric{_plural(computed_count)},"
+    outcome += f" and flagged {review_count} value{_plural(review_count)} for human review"
+    if conflicts:
+        first = conflicts[0]
+        extra = f" and {len(conflicts) - 1} other" if len(conflicts) > 1 else ""
+        outcome += f" — including a {first['severity'].lower()} conflict on {first['field_name'].replace('_', ' ')}{extra}"
+    outcome += "."
+    parts.append(outcome)
+    return " ".join(parts)
 
 
 def _unreliable_source_reason(field_name: str, provider: str) -> str:
