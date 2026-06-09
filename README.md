@@ -168,6 +168,10 @@ created deals and review decisions persist across deploys and restarts.
 
 ## GenAI Usage Disclosure
 
+See [GENAI_USAGE.md](GENAI_USAGE.md) for the full disclosure — tools used, what
+the LLMs did (in development and inside the product), representative prompts, and
+the general prompting approach. Summary below.
+
 Two GenAI tools were used on this project:
 
 **ChatGPT / Codex** — initial architecture planning, scaffolding of the data
