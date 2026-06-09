@@ -160,6 +160,20 @@ class DealService:
         if document_ids:
             self.db.query(DocumentChunk).filter(DocumentChunk.document_id.in_(document_ids)).delete(synchronize_session=False)
         self.db.query(Document).filter(Document.deal_id == deal_id).delete(synchronize_session=False)
+
+        # sector/geography/summary on the company are written only by enrichment
+        # (the edit form never touches them), so they are agent-derived. Reset
+        # them so a re-run regenerates them with fresh provenance. Otherwise a
+        # low-stage deal whose required fields are all satisfiable by these
+        # columns looks "fully covered" after its facts are cleared, and the
+        # planner short-circuits to an empty 'finish'.
+        deal = self.db.query(Deal).filter(Deal.deal_id == deal_id).first()
+        if deal is not None:
+            company = self.db.query(Company).filter(Company.company_id == deal.company_id).first()
+            if company is not None:
+                company.sector = None
+                company.geography = None
+                company.summary = None
         self.db.flush()
 
 

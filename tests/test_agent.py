@@ -261,6 +261,36 @@ class ReasoningRerunDedupTests(unittest.TestCase):
         self.assertEqual(len(fields), len(set(fields)), f"duplicate fields in accepted_facts: {fields}")
 
 
+class ClearResetsEnrichedColumnsTests(unittest.TestCase):
+    def setUp(self) -> None:
+        os.environ["GEMINI_API_KEY"] = ""
+        os.environ["SERPER_API_KEY"] = ""
+        build_db()
+
+    def test_clear_resets_agent_enriched_company_columns(self) -> None:
+        # sector/geography/summary are agent-derived (enrichment writes them).
+        # If clearing leaves them set, a low-stage deal's coverage looks closed
+        # with zero facts and the planner short-circuits to an empty 'finish'.
+        from src.database.models import Company, Deal
+        from src.services.deal_service import DealService
+
+        with SessionLocal() as db:
+            deal = db.query(Deal).filter(Deal.deal_id == "d_nova").first()
+            company = db.query(Company).filter(Company.company_id == deal.company_id).first()
+            company.sector = "Stale Sector"
+            company.geography = "Stale Geo"
+            company.summary = "stale summary"
+            db.commit()
+
+            DealService(db).clear_generated_intelligence("d_nova")
+            db.commit()
+
+            refreshed = db.query(Company).filter(Company.company_id == deal.company_id).first()
+            self.assertIsNone(refreshed.sector)
+            self.assertIsNone(refreshed.geography)
+            self.assertIsNone(refreshed.summary)
+
+
 class MetricPersistenceTests(unittest.TestCase):
     def setUp(self) -> None:
         os.environ["GEMINI_API_KEY"] = ""
