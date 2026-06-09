@@ -27,6 +27,7 @@ const els = {
   postRunArea: document.getElementById("postRunArea"),
   runMessage: document.getElementById("runMessage"),
   runSummary: document.getElementById("runSummary"),
+  exportCsvButton: document.getElementById("exportCsvButton"),
   agentResults: document.getElementById("agentResults"),
   companyName: document.getElementById("companyName"),
   dealStage: document.getElementById("dealStage"),
@@ -403,10 +404,36 @@ function formatCandidate(candidate) {
   return String(candidate.value);
 }
 
+const METRIC_INFO = {
+  arr_valuation_multiple: {
+    label: "ARR Valuation Multiple",
+    format: (v) => `${v.toFixed(1)}×`,
+    desc: "Pre-money valuation ÷ ARR — how many times annual recurring revenue the company is valued at.",
+  },
+  annual_burn_pct_of_arr: {
+    label: "Annual Burn as % of ARR",
+    format: (v) => `${Math.round(v * 100)}%`,
+    desc: "Annualized monthly burn ÷ ARR — how much it spends per year relative to revenue.",
+  },
+};
+
 function metricCard(metric) {
-  const flags = metric.quality_flags.length ? `Flags: ${metric.quality_flags.join(", ")}` : "Inputs accepted";
+  const info = METRIC_INFO[metric.metric_name] || {
+    label: labelAction(metric.metric_name),
+    format: (v) => String(v),
+    desc: metric.formula,
+  };
   const tone = metric.review_status === "review_required" ? "warn" : "";
-  return itemCard(metric.metric_name, `${metric.value} | ${metric.formula}`, flags, tone);
+  const flags = metric.quality_flags.length
+    ? `Needs review — ${metric.quality_flags.join(", ").replace(/_/g, " ")}`
+    : "Inputs accepted";
+  return `
+    <div class="item ${tone} metric-card">
+      <div class="item-title"><span>${escapeHtml(info.label)}</span><span class="metric-value">${escapeHtml(info.format(metric.value))}</span></div>
+      <p class="metric-desc">${escapeHtml(info.desc)}</p>
+      <p class="metric-meta">${escapeHtml(metric.formula)} · ${escapeHtml(flags)}</p>
+    </div>
+  `;
 }
 
 function documentCard(doc) {
@@ -624,6 +651,8 @@ async function refreshAfterReview() {
   // an accepted value appears in the facts table.
   await loadIntelligence();
   await loadEvents();
+  els.runMessage.classList.remove("warn");
+  els.runMessage.textContent = "✓ Saved to the deal record — it will still be here after a refresh.";
 }
 
 function eventCard(event) {
@@ -700,6 +729,9 @@ els.uploadForm.addEventListener("submit", uploadDocument);
 els.runButton.addEventListener("click", runAgent);
 els.reviewItems.addEventListener("submit", resolveReview);
 els.reviewItems.addEventListener("click", handleReviewAction);
+els.exportCsvButton.addEventListener("click", () => {
+  if (state.selectedDealId) window.location = `/deals/${encodeURIComponent(state.selectedDealId)}/export.csv`;
+});
 window.addEventListener("popstate", routeFromUrl);
 els.pipelineBoard.addEventListener("click", (event) => {
   const button = event.target.closest("[data-deal-id]");

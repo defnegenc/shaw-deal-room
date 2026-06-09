@@ -1,4 +1,6 @@
 from dataclasses import asdict
+import csv
+import io
 import logging
 import os
 from pathlib import Path
@@ -7,7 +9,7 @@ import re
 logger = logging.getLogger(__name__)
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -231,6 +233,52 @@ def view_source_document(deal_id: str, filename: str = Query(...), db: Session =
 def download_source_document(deal_id: str, filename: str = Query(...), db: Session = Depends(get_db)) -> FileResponse:
     path = _safe_source_document_path(deal_id, filename, db)
     return FileResponse(path, media_type="text/plain", filename=path.name)
+
+
+@app.get("/deals/{deal_id}/export.csv")
+def export_deal_csv(deal_id: str, db: Session = Depends(get_db)) -> Response:
+    """Export the deal's accepted facts, computed metrics, and review queue as CSV."""
+    result = DealResearchAgent(db).load_intelligence(deal_id)
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(["category", "name", "value", "status", "source", "as_of_date", "confidence", "notes"])
+    if result is not None:
+        for fact in result.accepted_facts:
+            writer.writerow([
+                "accepted_fact", fact["field_name"],
+                _csv_value(fact), fact["review_status"], "",
+                fact.get("as_of_date") or "", fact.get("confidence_score") or "", "",
+            ])
+        for metric in result.computed_metrics:
+            writer.writerow([
+                "computed_metric", metric["metric_name"], metric["value"],
+                metric["review_status"], "", "", metric.get("confidence_score") or "",
+                f"{metric['formula']}; {', '.join(metric.get('quality_flags') or []) or 'inputs accepted'}",
+            ])
+        for item in result.review_items:
+            candidate = item.get("candidate") or {}
+            writer.writerow([
+                "needs_review", item["field_name"],
+                candidate.get("value", ""), "open", candidate.get("source_label") or "",
+                candidate.get("as_of_date") or "", candidate.get("confidence_score") or "", item.get("reason", ""),
+            ])
+    filename = f"{deal_id}_deal_intelligence.csv"
+    return Response(
+        content=buffer.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+def _csv_value(fact: dict) -> str:
+    value = fact.get("value")
+    if value is None:
+        return ""
+    if fact.get("currency") == "USD" and isinstance(value, (int, float)):
+        return f"${value:,.0f}"
+    if fact.get("unit"):
+        return f"{value} {fact['unit']}"
+    return str(value)
 
 
 @app.get("/deals/{deal_id}/intelligence")
