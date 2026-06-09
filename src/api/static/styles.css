@@ -312,6 +312,19 @@ button:disabled {
   gap: 16px;
 }
 
+.results-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  .results-row {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* ---------- Pipeline board ---------- */
 
 .pipeline-board {
@@ -515,6 +528,18 @@ dd {
   color: var(--muted);
   cursor: not-allowed;
   opacity: 1;
+}
+
+#runButton.running {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  cursor: progress;
+}
+
+.spinner-light {
+  border-color: rgba(255, 255, 255, 0.4);
+  border-top-color: #fff;
 }
 
 .run-message {

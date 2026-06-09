@@ -198,9 +198,11 @@ async function runAgent() {
 
   const startDealId = deal.deal_id;
   state.agentRunning = deal.company_name;
-  els.runMessage.textContent = "";
   els.runMessage.classList.remove("warn");
+  els.runMessage.textContent = "Scroll down to see agent progress ↓";
   els.runButton.disabled = true;
+  els.runButton.classList.add("running");
+  els.runButton.innerHTML = `<span class="spinner spinner-light"></span> Agent Running…`;
 
   els.postRunArea.classList.remove("hidden");
   startLiveSteps();
@@ -215,16 +217,20 @@ async function runAgent() {
     if (state.selectedDealId === startDealId) {
       renderResult(result);
       await loadEvents();
+      els.runMessage.textContent = "";
     }
   } catch (error) {
     stopLiveSteps();
     if (state.selectedDealId === startDealId) {
       els.agentActions.className = "action-timeline";
       els.agentActions.innerHTML = actionItem("Agent run failed", error.message, "danger");
+      els.runMessage.textContent = "";
     }
   } finally {
     state.agentRunning = null;
     els.runButton.disabled = false;
+    els.runButton.classList.remove("running");
+    els.runButton.textContent = "Run Agent";
   }
 }
 

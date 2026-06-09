@@ -8,6 +8,10 @@ The prototype optimizes for one workflow: update a deal's intelligence from loca
 
 ## System Diagram
 
+![AI Deal Room system diagram](docs/architecture.png)
+
+(Source below; renders automatically on GitHub.)
+
 ```mermaid
 graph TD
     A[Investment Associate] --> CLI[CLI]
